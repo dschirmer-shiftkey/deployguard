@@ -82,7 +82,16 @@ async function run(): Promise<void> {
       apiUrl:
         process.env.DEPLOYGUARD_API_URL ?? "https://api.komatik.xyz/deploy/evaluate",
       githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
-      healthCheckUrl: core.getInput("health-check-url") || undefined,
+      healthCheckUrls: [
+        ...(core.getInput("health-check-urls") || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        ...(core.getInput("health-check-url") || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ].filter((v, i, a) => a.indexOf(v) === i),
       riskThreshold: parseInt(core.getInput("risk-threshold") || "70", 10),
       warnThreshold: core.getInput("warn-threshold")
         ? parseInt(core.getInput("warn-threshold"), 10)

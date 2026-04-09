@@ -330,6 +330,114 @@ export async function checkMcpHealth(): Promise<HealthCheckResult | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Health check (Vercel Deployment Status)
+// ---------------------------------------------------------------------------
+
+const VERCEL_TIMEOUT_MS = 10_000;
+
+export async function checkVercelHealth(): Promise<HealthCheckResult | null> {
+  const token = process.env.VERCEL_TOKEN;
+  const projectId = process.env.VERCEL_PROJECT_ID;
+  if (!token || !projectId) return null;
+
+  const start = Date.now();
+  try {
+    const url = `https://api.vercel.com/v6/deployments?projectId=${encodeURIComponent(projectId)}&target=production&limit=1`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(VERCEL_TIMEOUT_MS),
+    });
+    const latencyMs = Date.now() - start;
+
+    if (!response.ok) {
+      return {
+        target: "vercel:production",
+        status: "warn",
+        latencyMs,
+        detail: { httpStatus: response.status, source: "vercel" },
+      };
+    }
+
+    const body = (await response.json()) as {
+      deployments?: Array<{ readyState?: string; url?: string }>;
+    };
+    const deployment = body?.deployments?.[0];
+    if (!deployment) {
+      return {
+        target: "vercel:production",
+        status: "warn",
+        latencyMs,
+        detail: { source: "vercel", reason: "no deployments found" },
+      };
+    }
+
+    const state = deployment.readyState;
+    let status: GateDecision;
+    if (state === "READY") {
+      status = "allow";
+    } else if (state === "ERROR" || state === "CANCELED") {
+      status = "block";
+    } else {
+      status = "warn";
+    }
+
+    return {
+      target: "vercel:production",
+      status,
+      latencyMs,
+      detail: { source: "vercel", readyState: state, url: deployment.url },
+    };
+  } catch (error) {
+    return {
+      target: "vercel:production",
+      status: "warn",
+      latencyMs: Date.now() - start,
+      detail: { error: String(error), source: "vercel" },
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Health check (Supabase REST)
+// ---------------------------------------------------------------------------
+
+const SUPABASE_TIMEOUT_MS = 10_000;
+
+export async function checkSupabaseHealth(): Promise<HealthCheckResult | null> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey) return null;
+
+  const start = Date.now();
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/`, {
+      method: "GET",
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+      },
+      signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
+    });
+    const latencyMs = Date.now() - start;
+
+    return {
+      target: "supabase:rest",
+      status: response.ok ? "allow" : "warn",
+      latencyMs,
+      detail: { httpStatus: response.status, source: "supabase" },
+    };
+  } catch (error) {
+    return {
+      target: "supabase:rest",
+      status: "warn",
+      latencyMs: Date.now() - start,
+      detail: { error: String(error), source: "supabase" },
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Health score aggregation
 // ---------------------------------------------------------------------------
 
@@ -428,14 +536,19 @@ export async function evaluateGate(
 ): Promise<GateEvaluation> {
   const start = Date.now();
 
-  const [files, authorFactor, httpHealthCheck, mcpCheck] = await Promise.all([
-    prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
-    prNumber && config.githubToken
-      ? computeAuthorHistory(prNumber, config.githubToken)
-      : Promise.resolve(null),
-    config.healthCheckUrl ? checkHealth(config.healthCheckUrl) : Promise.resolve(null),
-    checkMcpHealth(),
-  ]);
+  const [files, authorFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck] =
+    await Promise.all([
+      prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
+      prNumber && config.githubToken
+        ? computeAuthorHistory(prNumber, config.githubToken)
+        : Promise.resolve(null),
+      config.healthCheckUrls.length > 0
+        ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
+        : Promise.resolve([]),
+      checkVercelHealth(),
+      checkSupabaseHealth(),
+      checkMcpHealth(),
+    ]);
 
   const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files);
 
@@ -446,8 +559,9 @@ export async function evaluateGate(
   const riskScore =
     riskFactors.length > 0 ? weightedAverageScores(riskFactors) : localRiskScore;
 
-  const healthChecks: HealthCheckResult[] = [];
-  if (httpHealthCheck) healthChecks.push(httpHealthCheck);
+  const healthChecks: HealthCheckResult[] = [...httpHealthChecks];
+  if (vercelCheck) healthChecks.push(vercelCheck);
+  if (supabaseCheck) healthChecks.push(supabaseCheck);
   if (mcpCheck) healthChecks.push(mcpCheck);
 
   const healthScore = aggregateHealthScore(healthChecks);

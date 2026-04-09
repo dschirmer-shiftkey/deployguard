@@ -45,11 +45,16 @@ jobs:
         with:
           api-key: ${{ secrets.DEPLOYGUARD_API_KEY }}
           github-token: ${{ github.token }}
-          health-check-url: https://api.example.com/health
+          health-check-urls: "https://myapp.com/api/health"
           risk-threshold: 70
           warn-threshold: 55
           reviewers-on-risk: "alice,bob"
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 ```
 
 ### Inputs
@@ -58,7 +63,8 @@ jobs:
 | ------------------- | -------- | --------------------- | --------------------------------------------------------------- |
 | `api-key`           | Yes      | —                     | DeployGuard API key from komatik.xyz dashboard                  |
 | `github-token`      | No       | `${{ github.token }}` | GitHub token for PR analysis                                    |
-| `health-check-url`  | No       | —                     | Production health check URL                                     |
+| `health-check-urls` | No       | —                     | Comma-separated URLs to check before deploying                  |
+| `health-check-url`  | No       | —                     | _(Deprecated)_ Single health check URL (alias for above)        |
 | `risk-threshold`    | No       | `70`                  | Block deployment if risk score exceeds this                     |
 | `warn-threshold`    | No       | `risk-threshold - 15` | Warn if risk score exceeds this                                 |
 | `fail-mode`         | No       | `open`                | Behavior when unreachable: `open` or `closed`                   |
@@ -67,6 +73,19 @@ jobs:
 | `reviewers-on-risk` | No       | —                     | Comma-separated usernames to request as reviewers on warn/block |
 | `webhook-url`       | No       | —                     | URL to POST evaluation results (Slack, Discord, etc.)           |
 | `webhook-events`    | No       | `warn,block`          | Decisions that trigger the webhook                              |
+
+### Environment Variables (Optional)
+
+These opt-in variables enable additional production health checks:
+
+| Variable            | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `VERCEL_TOKEN`      | Vercel API token — enables deployment status checks    |
+| `VERCEL_PROJECT_ID` | Vercel project ID — required with `VERCEL_TOKEN`       |
+| `SUPABASE_URL`      | Supabase project URL — enables database health checks  |
+| `SUPABASE_ANON_KEY` | Supabase anon key — required with `SUPABASE_URL`       |
+| `MCP_GATEWAY_URL`   | MCP gateway URL — enables MCP health checks            |
+| `MCP_GATEWAY_KEY`   | MCP gateway auth key — required with `MCP_GATEWAY_URL` |
 
 ### Outputs
 
@@ -91,19 +110,27 @@ jobs:
 ## Architecture
 
 ```
-GitHub Action → Gate Evaluation API → Health Check (MCP) + Risk Scoring
-                                           ↓
-                                   Gate Decision (allow/warn/block)
-                                           ↓
-                                   (on test failure)
-                                   Self-Healing Test Repair → Re-run
+GitHub Action → Gate Evaluation
+                   ├── Health Checks (parallel)
+                   │     ├── HTTP endpoints (health-check-urls)
+                   │     ├── Vercel Deployment API
+                   │     ├── Supabase REST API
+                   │     └── MCP Gateway
+                   ├── Risk Scoring (PR analysis)
+                   │     ├── Code churn · file count · test coverage
+                   │     ├── Sensitive file detection
+                   │     └── Author history
+                   └── Gate Decision (allow / warn / block)
+                         ├── Check Run · PR comment · labels
+                         ├── Webhook notification
+                         └── Self-healing test repair
 ```
 
 | Component     | Technology                                              |
 | ------------- | ------------------------------------------------------- |
 | GitHub Action | TypeScript (compiled to single JS)                      |
 | Gate API      | Vercel Edge Functions                                   |
-| Health Check  | MCP Gateway proxy to infrastructure                     |
+| Health Check  | HTTP, Vercel API, Supabase REST, MCP Gateway            |
 | Risk Scoring  | Git history analysis + knowledge base patterns          |
 | Test Healer   | AST manipulation + framework-specific repair strategies |
 | Analytics     | Next.js 16 dashboard                                    |

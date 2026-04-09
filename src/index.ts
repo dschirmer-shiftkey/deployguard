@@ -4,6 +4,8 @@ export {
   computeRiskScore,
   isSensitiveFile,
   checkHealth,
+  checkVercelHealth,
+  checkSupabaseHealth,
   checkMcpHealth,
   decideGate,
   postPrComment,

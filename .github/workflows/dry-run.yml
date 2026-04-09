@@ -14,8 +14,8 @@ on:
         description: "Risk threshold (0-100)"
         required: false
         default: "70"
-      health-check-url:
-        description: "Health check URL (optional)"
+      health-check-urls:
+        description: "Comma-separated health check URLs (optional)"
         required: false
       use-komatik-pat:
         description: "Use KOMATIK_PAT secret for cross-repo access (true/false)"
@@ -61,7 +61,7 @@ jobs:
             --pr "${{ inputs.pr-number }}" \
             --threshold "${{ inputs.risk-threshold }}" \
             --sha "${{ steps.pr.outputs.sha }}" \
-            ${{ inputs.health-check-url && format('--health-url {0}', inputs.health-check-url) || '' }} \
+            ${{ inputs.health-check-urls && format('--health-url {0}', inputs.health-check-urls) || '' }} \
             2>&1)
           EXIT_CODE=$?
           set -e
@@ -93,7 +93,7 @@ jobs:
             echo ""
             echo "**Target:** \`${{ inputs.target-repo }}#${{ inputs.pr-number }}\`"
             echo "**Threshold:** ${{ inputs.risk-threshold }}"
-            echo "**Health URL:** ${{ inputs.health-check-url || '(none)' }}"
+            echo "**Health URLs:** ${{ inputs.health-check-urls || '(none)' }}"
             echo ""
             echo "---"
             echo ""
