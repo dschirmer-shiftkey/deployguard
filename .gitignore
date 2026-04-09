@@ -1,6 +1,14 @@
 node_modules/
-dist/
 .next/
+
+# dist/ — only keep ncc bundle output needed by GitHub Actions
+dist/**/*.d.ts
+dist/**/*.d.ts.map
+dist/**/*.js.map
+dist/**/!(index|sourcemap-register).js
+!dist/index.js
+!dist/sourcemap-register.js
+!dist/licenses.txt
 out/
 *.log
 .env

@@ -6,22 +6,26 @@ export interface TestHealer {
   repair(testFile: string, errorOutput: string): Promise<TestRepairResult>;
 }
 
-const healers: TestHealer[] = [];
+let healers: TestHealer[] = [];
 
 export function registerHealer(healer: TestHealer): void {
   healers.push(healer);
 }
 
+export function clearHealers(): void {
+  healers = [];
+}
+
 export function getHealerFor(
   testFile: string,
-  errorOutput: string
+  errorOutput: string,
 ): TestHealer | undefined {
   return healers.find((h) => h.canHandle(testFile, errorOutput));
 }
 
 export async function attemptRepair(
   testFile: string,
-  errorOutput: string
+  errorOutput: string,
 ): Promise<TestRepairResult | null> {
   const healer = getHealerFor(testFile, errorOutput);
   if (!healer) return null;

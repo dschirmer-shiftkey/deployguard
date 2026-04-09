@@ -34,12 +34,17 @@ intelligent, context-aware guardrails:
 # .github/workflows/deploy.yml
 jobs:
   deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # required for gate report PR comments
     steps:
       - uses: dschirmer-shiftkey/deployguard@v1
         with:
           api-key: ${{ secrets.DEPLOYGUARD_API_KEY }}
+          github-token: ${{ github.token }} # default — reads PR files
           health-check-url: https://api.example.com/health
-          risk-threshold: 70  # block if risk score > 70
+          risk-threshold: 70 # block if risk score > 70
 ```
 
 ---
@@ -55,15 +60,15 @@ GitHub Action → Gate Evaluation API → Health Check (MCP) + Risk Scoring
                                    Self-Healing Test Repair → Re-run
 ```
 
-| Component | Technology |
-|-----------|-----------|
-| GitHub Action | TypeScript (compiled to single JS) |
-| Gate API | Vercel Edge Functions |
-| Health Check | MCP Gateway proxy to infrastructure |
-| Risk Scoring | Git history analysis + knowledge base patterns |
-| Test Healer | AST manipulation + framework-specific repair strategies |
-| Analytics | Next.js 16 dashboard |
-| Billing | Stripe subscriptions (Free / Pro $49 / Team $199) |
+| Component     | Technology                                              |
+| ------------- | ------------------------------------------------------- |
+| GitHub Action | TypeScript (compiled to single JS)                      |
+| Gate API      | Vercel Edge Functions                                   |
+| Health Check  | MCP Gateway proxy to infrastructure                     |
+| Risk Scoring  | Git history analysis + knowledge base patterns          |
+| Test Healer   | AST manipulation + framework-specific repair strategies |
+| Analytics     | Next.js 16 dashboard                                    |
+| Billing       | Stripe subscriptions (Free / Pro $49 / Team $199)       |
 
 ---
 
@@ -87,13 +92,13 @@ npm test
 
 ## Key Files
 
-| Path | Purpose |
-|------|---------|
-| `action.yml` | GitHub Action definition |
-| `src/` | Action source code (TypeScript) |
-| `src/healers/` | Framework-specific test repair strategies |
-| `docs/` | Product brief, technical spec, and architectural decisions |
-| `scripts/` | Local testing and simulation tools |
+| Path           | Purpose                                                    |
+| -------------- | ---------------------------------------------------------- |
+| `action.yml`   | GitHub Action definition                                   |
+| `src/`         | Action source code (TypeScript)                            |
+| `src/healers/` | Framework-specific test repair strategies                  |
+| `docs/`        | Product brief, technical spec, and architectural decisions |
+| `scripts/`     | Local testing and simulation tools                         |
 
 ---
 
@@ -114,12 +119,12 @@ Komatik's orchestrator — extracted and packaged for CI/CD.
 **3. Developer funnel.** Engineers who adopt DeployGuard are introduced to the
 Komatik ecosystem. The free tier serves as awareness for the broader platform.
 
-| Signal | What it teaches Komatik |
-|--------|------------------------|
-| Deployment failure patterns | Common reasons production deployments fail |
-| Infrastructure health baselines | Normal vs. abnormal infrastructure states |
-| Test flakiness patterns | Which test failures are environmental vs. real bugs |
-| Self-healing success rates | Effectiveness of automated test repair by framework |
+| Signal                          | What it teaches Komatik                             |
+| ------------------------------- | --------------------------------------------------- |
+| Deployment failure patterns     | Common reasons production deployments fail          |
+| Infrastructure health baselines | Normal vs. abnormal infrastructure states           |
+| Test flakiness patterns         | Which test failures are environmental vs. real bugs |
+| Self-healing success rates      | Effectiveness of automated test repair by framework |
 
 Full product specification: [`Komatik/docs/products/deployguard/`](https://github.com/dschirmer-shiftkey/Komatik/tree/dev/docs/products/deployguard)
 
