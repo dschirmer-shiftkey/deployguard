@@ -12,12 +12,7 @@ export const HealthCheckResult = z.object({
 export type HealthCheckResult = z.infer<typeof HealthCheckResult>;
 
 export const RiskFactor = z.object({
-  type: z.enum([
-    "code_churn",
-    "test_coverage",
-    "file_history",
-    "author_history",
-  ]),
+  type: z.enum(["code_churn", "test_coverage", "file_history", "author_history"]),
   score: z.number().min(0).max(100),
   detail: z.record(z.unknown()).optional(),
 });
@@ -38,9 +33,21 @@ export const GateEvaluation = z.object({
 });
 export type GateEvaluation = z.infer<typeof GateEvaluation>;
 
+export const GateApiResponse = z.object({
+  id: z.string().optional(),
+  reportUrl: z.string().url().optional(),
+  healthScore: z.number().min(0).max(100).optional(),
+  riskScore: z.number().min(0).max(100).optional(),
+  gateDecision: GateDecision.optional(),
+  healthChecks: z.array(HealthCheckResult).optional(),
+  riskFactors: z.array(RiskFactor).optional(),
+});
+export type GateApiResponse = z.infer<typeof GateApiResponse>;
+
 export interface DeployGuardConfig {
   apiKey: string;
   apiUrl: string;
+  githubToken?: string;
   healthCheckUrl?: string;
   riskThreshold: number;
   failMode: "open" | "closed";

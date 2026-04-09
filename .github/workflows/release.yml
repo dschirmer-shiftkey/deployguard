@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      - name: Build (ncc)
+        run: npm run build
+
+      - name: Verify dist/ is up to date
+        run: |
+          git diff --exit-code dist/ || {
+            echo "::error::dist/ is stale — run 'npm run build' and commit before tagging"
+            exit 1
+          }
+
+      - name: Update major version tag
+        run: |
+          MAJOR=$(echo "${GITHUB_REF_NAME}" | grep -oP '^v\d+')
+          git tag -f "${MAJOR}" HEAD
+          git push origin "${MAJOR}" --force
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "DeployGuard ${GITHUB_REF_NAME}" \
+            --generate-notes

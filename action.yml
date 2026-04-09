@@ -10,6 +10,10 @@ inputs:
   api-key:
     description: "DeployGuard API key (from komatik.xyz dashboard)"
     required: true
+  github-token:
+    description: "GitHub token for PR file analysis (defaults to automatic token)"
+    required: false
+    default: ${{ github.token }}
   health-check-url:
     description: "Primary health check URL for your production service"
     required: false
@@ -39,4 +43,4 @@ outputs:
 
 runs:
   using: "node20"
-  main: "dist/main.js"
+  main: "dist/index.js"

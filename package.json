@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "DeployGuard — self-healing CI/CD deployment gates with MCP-based infrastructure health checks",
-  "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "ncc build src/main.ts -o dist --source-map --license licenses.txt",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "dev": "tsx watch src/main.ts",
-    "lint": "tsc --noEmit",
-    "test": "echo 'no tests configured yet'"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
@@ -17,8 +20,15 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
+    "@vercel/ncc": "^0.38.4",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.58.1",
+    "vitest": "^4.1.4"
   }
 }
