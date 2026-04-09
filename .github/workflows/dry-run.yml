@@ -1,0 +1,112 @@
+name: "Dry-Run Gate Evaluation"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target-repo:
+        description: "Target repository (owner/repo)"
+        required: true
+        default: "dschirmer-shiftkey/Komatik"
+      pr-number:
+        description: "PR number to evaluate"
+        required: true
+      risk-threshold:
+        description: "Risk threshold (0-100)"
+        required: false
+        default: "70"
+      health-check-url:
+        description: "Health check URL (optional)"
+        required: false
+      token-secret:
+        description: "Name of the secret holding a PAT with target repo access (default: KOMATIK_PAT)"
+        required: false
+        default: "KOMATIK_PAT"
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: "Evaluate PR #${{ inputs.pr-number }} on ${{ inputs.target-repo }}"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run gate evaluation
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ secrets[inputs.token-secret] || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ inputs.target-repo }}
+        run: |
+          set +e
+          OUTPUT=$(npx tsx scripts/simulate.ts \
+            --pr "${{ inputs.pr-number }}" \
+            --threshold "${{ inputs.risk-threshold }}" \
+            ${{ inputs.health-check-url && format('--health-url {0}', inputs.health-check-url) || '' }} \
+            2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          echo "$OUTPUT"
+
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "report<<REPORT_EOF"
+            echo "$OUTPUT" | sed -n '/^## DeployGuard/,/^Raw evaluation/{ /^Raw evaluation/d; p; }'
+            echo "REPORT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "raw<<RAW_EOF"
+            echo "$OUTPUT" | sed -n '/^Raw evaluation/,$ p'
+            echo "RAW_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write job summary
+        env:
+          REPORT: ${{ steps.gate.outputs.report }}
+          RAW: ${{ steps.gate.outputs.raw }}
+          EXIT_CODE: ${{ steps.gate.outputs.exit_code }}
+        run: |
+          {
+            echo "# DeployGuard Dry-Run"
+            echo ""
+            echo "**Target:** \`${{ inputs.target-repo }}#${{ inputs.pr-number }}\`"
+            echo "**Threshold:** ${{ inputs.risk-threshold }}"
+            echo "**Health URL:** ${{ inputs.health-check-url || '(none)' }}"
+            echo ""
+            echo "---"
+            echo ""
+            echo "$REPORT"
+            echo ""
+            echo "---"
+            echo ""
+            echo "<details><summary>Raw evaluation JSON</summary>"
+            echo ""
+            echo '```json'
+            echo "$RAW"
+            echo '```'
+            echo "</details>"
+            echo ""
+            if [ "$EXIT_CODE" = "0" ]; then
+              echo "> ✅ **Gate would ALLOW this deployment**"
+            elif [ "$EXIT_CODE" = "1" ]; then
+              echo "> 🚫 **Gate would BLOCK this deployment**"
+            else
+              echo "> ⚠️ **Simulation encountered an error (exit $EXIT_CODE)**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on block (informational only)
+        if: steps.gate.outputs.exit_code == '1'
+        run: |
+          echo "::warning::Gate would BLOCK PR #${{ inputs.pr-number }} on ${{ inputs.target-repo }} (risk exceeded threshold ${{ inputs.risk-threshold }})"
