@@ -60,6 +60,10 @@ export interface DeployGuardConfig {
   warnThreshold?: number;
   failMode: "open" | "closed";
   selfHeal: boolean;
+  addRiskLabels: boolean;
+  reviewersOnRisk: string[];
+  webhookUrl?: string;
+  webhookEvents: string[];
 }
 
 export interface TestRepairResult {

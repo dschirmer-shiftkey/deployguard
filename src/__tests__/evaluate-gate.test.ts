@@ -58,6 +58,9 @@ function makeConfig(overrides: Partial<DeployGuardConfig> = {}): DeployGuardConf
     riskThreshold: 70,
     failMode: "open",
     selfHeal: false,
+    addRiskLabels: true,
+    reviewersOnRisk: [],
+    webhookEvents: ["warn", "block"],
     ...overrides,
   };
 }

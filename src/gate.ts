@@ -539,10 +539,222 @@ export async function postPrComment(
 }
 
 // ---------------------------------------------------------------------------
+// GitHub Check Run
+// ---------------------------------------------------------------------------
+
+const CONCLUSION_MAP: Record<GateDecision, "success" | "neutral" | "failure"> = {
+  allow: "success",
+  warn: "neutral",
+  block: "failure",
+};
+
+export async function createCheckRun(
+  evaluation: GateEvaluation,
+  report: string,
+  token: string,
+): Promise<void> {
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+
+    await octokit.rest.checks.create({
+      owner,
+      repo,
+      name: "DeployGuard",
+      head_sha: evaluation.commitSha,
+      status: "completed",
+      conclusion: CONCLUSION_MAP[evaluation.gateDecision],
+      output: {
+        title: `DeployGuard: ${evaluation.gateDecision.toUpperCase()}`,
+        summary: report,
+      },
+    });
+  } catch (error) {
+    core.debug(`Failed to create check run: ${error}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PR risk labels
+// ---------------------------------------------------------------------------
+
+const RISK_LABELS: Record<string, { color: string; description: string }> = {
+  "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
+  "deployguard:medium-risk": { color: "fbca04", description: "DeployGuard: medium risk score" },
+  "deployguard:high-risk": { color: "d93f0b", description: "DeployGuard: high risk score" },
+};
+
+function riskLabelForDecision(decision: GateDecision): string {
+  switch (decision) {
+    case "allow":
+      return "deployguard:low-risk";
+    case "warn":
+      return "deployguard:medium-risk";
+    case "block":
+      return "deployguard:high-risk";
+    default: {
+      const _exhaustive: never = decision;
+      throw new Error(`Unknown decision: ${_exhaustive}`);
+    }
+  }
+}
+
+export async function managePrLabels(
+  prNumber: number,
+  decision: GateDecision,
+  token: string,
+): Promise<void> {
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+
+    const targetLabel = riskLabelForDecision(decision);
+
+    for (const labelName of Object.keys(RISK_LABELS)) {
+      const meta = RISK_LABELS[labelName];
+      try {
+        await octokit.rest.issues.createLabel({
+          owner,
+          repo,
+          name: labelName,
+          color: meta.color,
+          description: meta.description,
+        });
+      } catch {
+        // 422 = already exists — expected
+      }
+    }
+
+    const { data: currentLabels } = await octokit.rest.issues.listLabelsOnIssue({
+      owner,
+      repo,
+      issue_number: prNumber,
+    });
+
+    for (const label of currentLabels) {
+      if (label.name.startsWith("deployguard:") && label.name.endsWith("-risk") && label.name !== targetLabel) {
+        await octokit.rest.issues.removeLabel({
+          owner,
+          repo,
+          issue_number: prNumber,
+          name: label.name,
+        });
+      }
+    }
+
+    const alreadyApplied = currentLabels.some((l) => l.name === targetLabel);
+    if (!alreadyApplied) {
+      await octokit.rest.issues.addLabels({
+        owner,
+        repo,
+        issue_number: prNumber,
+        labels: [targetLabel],
+      });
+    }
+  } catch (error) {
+    core.debug(`Failed to manage PR labels: ${error}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Auto-request reviewers on high risk
+// ---------------------------------------------------------------------------
+
+export async function requestHighRiskReviewers(
+  prNumber: number,
+  reviewers: string[],
+  token: string,
+): Promise<void> {
+  if (reviewers.length === 0) return;
+
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+
+    const { data: pr } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+    const author = pr.user?.login;
+
+    const filtered = reviewers.filter((r) => r !== author);
+    if (filtered.length === 0) return;
+
+    await octokit.rest.pulls.requestReviewers({
+      owner,
+      repo,
+      pull_number: prNumber,
+      reviewers: filtered,
+    });
+  } catch (error) {
+    core.debug(`Failed to request reviewers: ${error}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Report formatting
 // ---------------------------------------------------------------------------
 
-export function formatGateReport(evaluation: GateEvaluation): string {
+function buildScoreBar(score: number, threshold: number): string {
+  const width = 20;
+  const filled = Math.round((score / 100) * width);
+  const bar = "█".repeat(filled) + "░".repeat(width - filled);
+  return `\`${bar}\` ${score}/100 (threshold: ${threshold})`;
+}
+
+function buildGuidance(evaluation: GateEvaluation): string[] {
+  if (evaluation.gateDecision === "allow") return [];
+
+  const lines: string[] = [`### Guidance`, ``];
+  const factorTypes = new Set(evaluation.riskFactors.map((f) => f.type));
+
+  if (factorTypes.has("sensitive_files")) {
+    lines.push(
+      `- This PR modifies **high-risk files** (auth, migrations, payments, CI). ` +
+        `Consider splitting into smaller PRs or adding targeted reviewers.`,
+    );
+  }
+
+  const churnFactor = evaluation.riskFactors.find((f) => f.type === "code_churn");
+  if (churnFactor && churnFactor.score >= 70) {
+    lines.push(
+      `- **Large changeset** detected (churn score ${churnFactor.score}/100). ` +
+        `Consider breaking this into smaller, reviewable increments.`,
+    );
+  }
+
+  const testFactor = evaluation.riskFactors.find((f) => f.type === "test_coverage");
+  if (testFactor && testFactor.score >= 80) {
+    const detail = testFactor.detail as Record<string, unknown> | undefined;
+    const testFiles = (detail?.["testFiles"] as number | undefined) ?? 0;
+    if (testFiles === 0) {
+      lines.push(
+        `- **No test files** included in this PR. Adding test coverage reduces deployment risk.`,
+      );
+    } else {
+      lines.push(
+        `- **Low test-to-source ratio**. Consider adding more tests for the changed source files.`,
+      );
+    }
+  }
+
+  const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
+  if (fileCountFactor && fileCountFactor.score >= 80) {
+    lines.push(
+      `- **Many files changed**. Large PRs are harder to review thoroughly — consider splitting.`,
+    );
+  }
+
+  if (lines.length === 2) {
+    lines.push(`- Risk score exceeds threshold. Review the risk factors above before proceeding.`);
+  }
+
+  lines.push(``);
+  return lines;
+}
+
+export function formatGateReport(evaluation: GateEvaluation, riskThreshold?: number): string {
   const healthDisplay =
     evaluation.healthChecks.length > 0
       ? `${evaluation.healthScore}/100`
@@ -559,6 +771,10 @@ export function formatGateReport(evaluation: GateEvaluation): string {
     ``,
   ];
 
+  if (riskThreshold !== undefined) {
+    lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
+  }
+
   if (evaluation.riskFactors.length > 0) {
     lines.push(`### Risk Factors`, ``);
     for (const factor of evaluation.riskFactors) {
@@ -567,6 +783,11 @@ export function formatGateReport(evaluation: GateEvaluation): string {
       lines.push(`- **${factor.type}** — ${desc}: score ${factor.score}/100`);
     }
     lines.push(``);
+  }
+
+  const guidance = buildGuidance(evaluation);
+  if (guidance.length > 0) {
+    lines.push(...guidance);
   }
 
   if (evaluation.healthChecks.length > 0) {

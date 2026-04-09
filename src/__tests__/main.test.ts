@@ -5,37 +5,53 @@ const {
   mockEvaluateGate,
   mockFormatGateReport,
   mockPostPrComment,
+  mockCreateCheckRun,
+  mockManagePrLabels,
+  mockRequestHighRiskReviewers,
   mockRegisterHealer,
   mockAttemptRepair,
+  mockSendWebhook,
   mockGetInput,
   mockInfo,
   mockWarning,
   mockSetFailed,
   mockSetOutput,
   mockDebug,
+  mockSummaryAddRaw,
+  mockSummaryWrite,
   mockContext,
   mockCreateComment,
-} = vi.hoisted(() => ({
-  mockEvaluateGate: vi.fn(),
-  mockFormatGateReport: vi.fn(),
-  mockPostPrComment: vi.fn(),
-  mockRegisterHealer: vi.fn(),
-  mockAttemptRepair: vi.fn(),
-  mockGetInput: vi.fn(),
-  mockInfo: vi.fn(),
-  mockWarning: vi.fn(),
-  mockSetFailed: vi.fn(),
-  mockSetOutput: vi.fn(),
-  mockDebug: vi.fn(),
-  mockContext: {
-    repo: { owner: "test-owner", repo: "test-repo" },
-    sha: "abc1234567890",
-    payload: { pull_request: { number: 42 } } as {
-      pull_request?: { number: number };
+} = vi.hoisted(() => {
+  const mockSummaryWrite = vi.fn().mockResolvedValue(undefined);
+  const mockSummaryAddRaw = vi.fn().mockReturnValue({ write: mockSummaryWrite });
+  return {
+    mockEvaluateGate: vi.fn(),
+    mockFormatGateReport: vi.fn(),
+    mockPostPrComment: vi.fn(),
+    mockCreateCheckRun: vi.fn(),
+    mockManagePrLabels: vi.fn(),
+    mockRequestHighRiskReviewers: vi.fn(),
+    mockRegisterHealer: vi.fn(),
+    mockAttemptRepair: vi.fn(),
+    mockSendWebhook: vi.fn(),
+    mockGetInput: vi.fn(),
+    mockInfo: vi.fn(),
+    mockWarning: vi.fn(),
+    mockSetFailed: vi.fn(),
+    mockSetOutput: vi.fn(),
+    mockDebug: vi.fn(),
+    mockSummaryAddRaw,
+    mockSummaryWrite,
+    mockContext: {
+      repo: { owner: "test-owner", repo: "test-repo" },
+      sha: "abc1234567890",
+      payload: { pull_request: { number: 42 } } as {
+        pull_request?: { number: number };
+      },
     },
-  },
-  mockCreateComment: vi.fn(),
-}));
+    mockCreateComment: vi.fn(),
+  };
+});
 
 vi.mock("@actions/core", () => ({
   getInput: mockGetInput,
@@ -45,6 +61,7 @@ vi.mock("@actions/core", () => ({
   debug: mockDebug,
   setFailed: mockSetFailed,
   setOutput: mockSetOutput,
+  summary: { addRaw: mockSummaryAddRaw },
 }));
 
 vi.mock("@actions/github", () => ({
@@ -58,6 +75,13 @@ vi.mock("../gate.js", () => ({
   evaluateGate: mockEvaluateGate,
   formatGateReport: mockFormatGateReport,
   postPrComment: mockPostPrComment,
+  createCheckRun: mockCreateCheckRun,
+  managePrLabels: mockManagePrLabels,
+  requestHighRiskReviewers: mockRequestHighRiskReviewers,
+}));
+
+vi.mock("../notify.js", () => ({
+  sendWebhook: mockSendWebhook,
 }));
 
 vi.mock("../healers/index.js", () => ({
@@ -105,6 +129,10 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockReset();
     mockFormatGateReport.mockReset().mockReturnValue("## Report");
     mockPostPrComment.mockReset().mockResolvedValue(undefined);
+    mockCreateCheckRun.mockReset().mockResolvedValue(undefined);
+    mockManagePrLabels.mockReset().mockResolvedValue(undefined);
+    mockRequestHighRiskReviewers.mockReset().mockResolvedValue(undefined);
+    mockSendWebhook.mockReset().mockResolvedValue(undefined);
     mockRegisterHealer.mockReset();
     mockAttemptRepair.mockReset();
     mockGetInput.mockReset();
@@ -113,6 +141,8 @@ describe("run (main entrypoint)", () => {
     mockSetFailed.mockReset();
     mockSetOutput.mockReset();
     mockDebug.mockReset();
+    mockSummaryAddRaw.mockReset().mockReturnValue({ write: mockSummaryWrite });
+    mockSummaryWrite.mockReset().mockResolvedValue(undefined);
     mockCreateComment.mockReset().mockResolvedValue({});
     mockContext.payload = { pull_request: { number: 42 } };
     delete process.env.DEPLOYGUARD_TEST_FAILURES;
@@ -135,8 +165,21 @@ describe("run (main entrypoint)", () => {
     expect(mockSetOutput).toHaveBeenCalledWith("health-score", "100");
     expect(mockSetOutput).toHaveBeenCalledWith("risk-score", "30");
     expect(mockSetOutput).toHaveBeenCalledWith("gate-decision", "allow");
+    expect(mockSetOutput).toHaveBeenCalledWith(
+      "evaluation-json",
+      expect.stringContaining('"gateDecision":"allow"'),
+    );
     expect(mockInfo).toHaveBeenCalledWith("## Report");
     expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  it("writes job summary via core.summary", async () => {
+    setupInputs({ "api-key": "test-key" });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockSummaryAddRaw).toHaveBeenCalledWith("## Report");
+    expect(mockSummaryWrite).toHaveBeenCalled();
   });
 
   it("posts PR comment when prNumber and token are available", async () => {
@@ -149,6 +192,39 @@ describe("run (main entrypoint)", () => {
       42,
       "ghp_test",
     );
+  });
+
+  it("creates check run when token is available", async () => {
+    setupInputs({ "api-key": "test-key", "github-token": "ghp_test" });
+    const eval_ = makeEvaluation();
+    mockEvaluateGate.mockResolvedValue(eval_);
+    await runMain();
+
+    expect(mockCreateCheckRun).toHaveBeenCalledWith(
+      eval_,
+      "## Report",
+      "ghp_test",
+    );
+  });
+
+  it("manages PR labels when token and prNumber are available", async () => {
+    setupInputs({ "api-key": "test-key", "github-token": "ghp_test" });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockManagePrLabels).toHaveBeenCalledWith(42, "allow", "ghp_test");
+  });
+
+  it("skips PR labels when add-risk-labels is false", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "github-token": "ghp_test",
+      "add-risk-labels": "false",
+    });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockManagePrLabels).not.toHaveBeenCalled();
   });
 
   it("skips PR comment when no prNumber", async () => {
@@ -202,6 +278,95 @@ describe("run (main entrypoint)", () => {
     expect(mockSetFailed).toHaveBeenCalledWith(
       expect.stringContaining("Deployment blocked"),
     );
+  });
+
+  it("requests reviewers on warn when reviewers-on-risk is set", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "github-token": "ghp_test",
+      "self-heal": "false",
+      "reviewers-on-risk": "alice, bob",
+    });
+    mockEvaluateGate.mockResolvedValue(
+      makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
+    );
+    await runMain();
+
+    expect(mockRequestHighRiskReviewers).toHaveBeenCalledWith(
+      42,
+      ["alice", "bob"],
+      "ghp_test",
+    );
+  });
+
+  it("requests reviewers on block when reviewers-on-risk is set", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "github-token": "ghp_test",
+      "self-heal": "false",
+      "reviewers-on-risk": "alice",
+    });
+    mockEvaluateGate.mockResolvedValue(
+      makeEvaluation({ gateDecision: "block", riskScore: 90 }),
+    );
+    await runMain();
+
+    expect(mockRequestHighRiskReviewers).toHaveBeenCalledWith(
+      42,
+      ["alice"],
+      "ghp_test",
+    );
+  });
+
+  it("does not request reviewers on allow", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "github-token": "ghp_test",
+      "reviewers-on-risk": "alice",
+    });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockRequestHighRiskReviewers).not.toHaveBeenCalled();
+  });
+
+  it("sends webhook when decision matches webhook-events", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "webhook-url": "https://hooks.slack.com/test",
+      "webhook-events": "warn,block",
+      "self-heal": "false",
+    });
+    const eval_ = makeEvaluation({ gateDecision: "block", riskScore: 90 });
+    mockEvaluateGate.mockResolvedValue(eval_);
+    await runMain();
+
+    expect(mockSendWebhook).toHaveBeenCalledWith(
+      "https://hooks.slack.com/test",
+      eval_,
+    );
+  });
+
+  it("does not send webhook when decision does not match webhook-events", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "webhook-url": "https://hooks.slack.com/test",
+      "webhook-events": "block",
+    });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockSendWebhook).not.toHaveBeenCalled();
+  });
+
+  it("does not send webhook when webhook-url is not set", async () => {
+    setupInputs({ "api-key": "test-key", "self-heal": "false" });
+    mockEvaluateGate.mockResolvedValue(
+      makeEvaluation({ gateDecision: "block", riskScore: 90 }),
+    );
+    await runMain();
+
+    expect(mockSendWebhook).not.toHaveBeenCalled();
   });
 
   it("proceeds with warning on fail-open when evaluateGate throws", async () => {
@@ -406,6 +571,17 @@ describe("run (main entrypoint)", () => {
       expect.objectContaining({ warnThreshold: undefined }),
       "abc1234567890",
       42,
+    );
+  });
+
+  it("passes riskThreshold to formatGateReport", async () => {
+    setupInputs({ "api-key": "test-key", "risk-threshold": "65" });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockFormatGateReport).toHaveBeenCalledWith(
+      expect.objectContaining({ gateDecision: "allow" }),
+      65,
     );
   });
 });

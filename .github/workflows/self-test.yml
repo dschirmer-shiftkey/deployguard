@@ -1,0 +1,52 @@
+name: "Self-Test: DeployGuard on own PRs"
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  gate:
+    name: "DeployGuard Self-Test"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build action
+        run: npm run build
+
+      - name: Run DeployGuard on this PR
+        id: gate
+        uses: ./
+        with:
+          api-key: "self-test"
+          github-token: ${{ github.token }}
+          risk-threshold: "85"
+          warn-threshold: "50"
+          add-risk-labels: "true"
+          webhook-url: ""
+          fail-mode: "open"
+          self-heal: "false"
+
+      - name: Print outputs
+        if: always()
+        run: |
+          echo "gate-decision: ${{ steps.gate.outputs.gate-decision }}"
+          echo "risk-score:    ${{ steps.gate.outputs.risk-score }}"
+          echo "health-score:  ${{ steps.gate.outputs.health-score }}"
+          echo "report-url:    ${{ steps.gate.outputs.report-url }}"
+          echo ""
+          echo "--- evaluation-json (truncated) ---"
+          echo '${{ steps.gate.outputs.evaluation-json }}' | head -c 500

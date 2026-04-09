@@ -29968,6 +29968,9 @@ exports.checkMcpHealth = checkMcpHealth;
 exports.decideGate = decideGate;
 exports.evaluateGate = evaluateGate;
 exports.postPrComment = postPrComment;
+exports.createCheckRun = createCheckRun;
+exports.managePrLabels = managePrLabels;
+exports.requestHighRiskReviewers = requestHighRiskReviewers;
 exports.formatGateReport = formatGateReport;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
@@ -30401,9 +30404,179 @@ async function postPrComment(report, prNumber, token) {
     }
 }
 // ---------------------------------------------------------------------------
+// GitHub Check Run
+// ---------------------------------------------------------------------------
+const CONCLUSION_MAP = {
+    allow: "success",
+    warn: "neutral",
+    block: "failure",
+};
+async function createCheckRun(evaluation, report, token) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        await octokit.rest.checks.create({
+            owner,
+            repo,
+            name: "DeployGuard",
+            head_sha: evaluation.commitSha,
+            status: "completed",
+            conclusion: CONCLUSION_MAP[evaluation.gateDecision],
+            output: {
+                title: `DeployGuard: ${evaluation.gateDecision.toUpperCase()}`,
+                summary: report,
+            },
+        });
+    }
+    catch (error) {
+        core.debug(`Failed to create check run: ${error}`);
+    }
+}
+// ---------------------------------------------------------------------------
+// PR risk labels
+// ---------------------------------------------------------------------------
+const RISK_LABELS = {
+    "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
+    "deployguard:medium-risk": { color: "fbca04", description: "DeployGuard: medium risk score" },
+    "deployguard:high-risk": { color: "d93f0b", description: "DeployGuard: high risk score" },
+};
+function riskLabelForDecision(decision) {
+    switch (decision) {
+        case "allow":
+            return "deployguard:low-risk";
+        case "warn":
+            return "deployguard:medium-risk";
+        case "block":
+            return "deployguard:high-risk";
+        default: {
+            const _exhaustive = decision;
+            throw new Error(`Unknown decision: ${_exhaustive}`);
+        }
+    }
+}
+async function managePrLabels(prNumber, decision, token) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const targetLabel = riskLabelForDecision(decision);
+        for (const labelName of Object.keys(RISK_LABELS)) {
+            const meta = RISK_LABELS[labelName];
+            try {
+                await octokit.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name: labelName,
+                    color: meta.color,
+                    description: meta.description,
+                });
+            }
+            catch {
+                // 422 = already exists — expected
+            }
+        }
+        const { data: currentLabels } = await octokit.rest.issues.listLabelsOnIssue({
+            owner,
+            repo,
+            issue_number: prNumber,
+        });
+        for (const label of currentLabels) {
+            if (label.name.startsWith("deployguard:") && label.name.endsWith("-risk") && label.name !== targetLabel) {
+                await octokit.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    name: label.name,
+                });
+            }
+        }
+        const alreadyApplied = currentLabels.some((l) => l.name === targetLabel);
+        if (!alreadyApplied) {
+            await octokit.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: prNumber,
+                labels: [targetLabel],
+            });
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to manage PR labels: ${error}`);
+    }
+}
+// ---------------------------------------------------------------------------
+// Auto-request reviewers on high risk
+// ---------------------------------------------------------------------------
+async function requestHighRiskReviewers(prNumber, reviewers, token) {
+    if (reviewers.length === 0)
+        return;
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const { data: pr } = await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+        });
+        const author = pr.user?.login;
+        const filtered = reviewers.filter((r) => r !== author);
+        if (filtered.length === 0)
+            return;
+        await octokit.rest.pulls.requestReviewers({
+            owner,
+            repo,
+            pull_number: prNumber,
+            reviewers: filtered,
+        });
+    }
+    catch (error) {
+        core.debug(`Failed to request reviewers: ${error}`);
+    }
+}
+// ---------------------------------------------------------------------------
 // Report formatting
 // ---------------------------------------------------------------------------
-function formatGateReport(evaluation) {
+function buildScoreBar(score, threshold) {
+    const width = 20;
+    const filled = Math.round((score / 100) * width);
+    const bar = "█".repeat(filled) + "░".repeat(width - filled);
+    return `\`${bar}\` ${score}/100 (threshold: ${threshold})`;
+}
+function buildGuidance(evaluation) {
+    if (evaluation.gateDecision === "allow")
+        return [];
+    const lines = [`### Guidance`, ``];
+    const factorTypes = new Set(evaluation.riskFactors.map((f) => f.type));
+    if (factorTypes.has("sensitive_files")) {
+        lines.push(`- This PR modifies **high-risk files** (auth, migrations, payments, CI). ` +
+            `Consider splitting into smaller PRs or adding targeted reviewers.`);
+    }
+    const churnFactor = evaluation.riskFactors.find((f) => f.type === "code_churn");
+    if (churnFactor && churnFactor.score >= 70) {
+        lines.push(`- **Large changeset** detected (churn score ${churnFactor.score}/100). ` +
+            `Consider breaking this into smaller, reviewable increments.`);
+    }
+    const testFactor = evaluation.riskFactors.find((f) => f.type === "test_coverage");
+    if (testFactor && testFactor.score >= 80) {
+        const detail = testFactor.detail;
+        const testFiles = detail?.["testFiles"] ?? 0;
+        if (testFiles === 0) {
+            lines.push(`- **No test files** included in this PR. Adding test coverage reduces deployment risk.`);
+        }
+        else {
+            lines.push(`- **Low test-to-source ratio**. Consider adding more tests for the changed source files.`);
+        }
+    }
+    const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
+    if (fileCountFactor && fileCountFactor.score >= 80) {
+        lines.push(`- **Many files changed**. Large PRs are harder to review thoroughly — consider splitting.`);
+    }
+    if (lines.length === 2) {
+        lines.push(`- Risk score exceeds threshold. Review the risk factors above before proceeding.`);
+    }
+    lines.push(``);
+    return lines;
+}
+function formatGateReport(evaluation, riskThreshold) {
     const healthDisplay = evaluation.healthChecks.length > 0
         ? `${evaluation.healthScore}/100`
         : "n/a (not configured)";
@@ -30417,6 +30590,9 @@ function formatGateReport(evaluation) {
         `| **Decision** | **${evaluation.gateDecision.toUpperCase()}** |`,
         ``,
     ];
+    if (riskThreshold !== undefined) {
+        lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
+    }
     if (evaluation.riskFactors.length > 0) {
         lines.push(`### Risk Factors`, ``);
         for (const factor of evaluation.riskFactors) {
@@ -30425,6 +30601,10 @@ function formatGateReport(evaluation) {
             lines.push(`- **${factor.type}** — ${desc}: score ${factor.score}/100`);
         }
         lines.push(``);
+    }
+    const guidance = buildGuidance(evaluation);
+    if (guidance.length > 0) {
+        lines.push(...guidance);
     }
     if (evaluation.healthChecks.length > 0) {
         lines.push(`### Health Checks`, ``);
@@ -30848,6 +31028,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const gate_js_1 = __nccwpck_require__(1956);
+const notify_js_1 = __nccwpck_require__(1622);
 const index_js_1 = __nccwpck_require__(9114);
 const jest_js_1 = __nccwpck_require__(526);
 const playwright_js_1 = __nccwpck_require__(183);
@@ -30919,6 +31100,13 @@ async function run() {
                 : undefined,
             failMode: core.getInput("fail-mode") || "open",
             selfHeal: core.getInput("self-heal") !== "false",
+            addRiskLabels: core.getInput("add-risk-labels") !== "false",
+            reviewersOnRisk: core.getInput("reviewers-on-risk")
+                ? core.getInput("reviewers-on-risk").split(",").map((s) => s.trim()).filter(Boolean)
+                : [],
+            webhookUrl: core.getInput("webhook-url") || undefined,
+            webhookEvents: (core.getInput("webhook-events") || "warn,block")
+                .split(",").map((s) => s.trim()).filter(Boolean),
         };
         const context = github.context;
         const commitSha = context.sha;
@@ -30928,12 +31116,23 @@ async function run() {
         core.setOutput("health-score", evaluation.healthScore.toString());
         core.setOutput("risk-score", evaluation.riskScore.toString());
         core.setOutput("gate-decision", evaluation.gateDecision);
+        core.setOutput("evaluation-json", JSON.stringify(evaluation));
         if (evaluation.reportUrl) {
             core.setOutput("report-url", evaluation.reportUrl);
         }
-        const report = (0, gate_js_1.formatGateReport)(evaluation);
-        if (prNumber && config.githubToken) {
-            await (0, gate_js_1.postPrComment)(report, prNumber, config.githubToken);
+        const report = (0, gate_js_1.formatGateReport)(evaluation, config.riskThreshold);
+        await core.summary.addRaw(report).write();
+        if (config.githubToken) {
+            if (prNumber) {
+                await (0, gate_js_1.postPrComment)(report, prNumber, config.githubToken);
+            }
+            await (0, gate_js_1.createCheckRun)(evaluation, report, config.githubToken);
+            if (prNumber && config.addRiskLabels) {
+                await (0, gate_js_1.managePrLabels)(prNumber, evaluation.gateDecision, config.githubToken);
+            }
+        }
+        if (config.webhookUrl && config.webhookEvents.includes(evaluation.gateDecision)) {
+            await (0, notify_js_1.sendWebhook)(config.webhookUrl, evaluation);
         }
         switch (evaluation.gateDecision) {
             case "allow":
@@ -30941,6 +31140,9 @@ async function run() {
                 break;
             case "warn":
                 core.warning(report);
+                if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
+                    await (0, gate_js_1.requestHighRiskReviewers)(prNumber, config.reviewersOnRisk, config.githubToken);
+                }
                 if (config.selfHeal && prNumber) {
                     const repairs = await runSelfHeal(config, prNumber);
                     if (repairs.length > 0) {
@@ -30950,6 +31152,9 @@ async function run() {
                 }
                 break;
             case "block":
+                if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
+                    await (0, gate_js_1.requestHighRiskReviewers)(prNumber, config.reviewersOnRisk, config.githubToken);
+                }
                 if (config.selfHeal && prNumber) {
                     const repairs = await runSelfHeal(config, prNumber);
                     const successes = repairs.filter((r) => r.success);
@@ -30978,6 +31183,97 @@ async function run() {
     }
 }
 run();
+
+
+/***/ }),
+
+/***/ 1622:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.sendWebhook = sendWebhook;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+const WEBHOOK_TIMEOUT_MS = 10_000;
+async function sendWebhook(url, evaluation) {
+    const { owner, repo } = github.context.repo;
+    const prUrl = evaluation.prNumber
+        ? `https://github.com/${owner}/${repo}/pull/${evaluation.prNumber}`
+        : undefined;
+    const decisionEmoji = {
+        allow: "✅",
+        warn: "⚠️",
+        block: "🚫",
+    };
+    const emoji = decisionEmoji[evaluation.gateDecision] ?? "";
+    const slackText = `${emoji} DeployGuard *${evaluation.gateDecision.toUpperCase()}* — ` +
+        `risk ${evaluation.riskScore}/100` +
+        (prUrl ? ` | <${prUrl}|PR #${evaluation.prNumber}>` : ` | ${evaluation.commitSha.substring(0, 7)}`) +
+        ` on \`${evaluation.repoId}\``;
+    const payload = {
+        text: slackText,
+        decision: evaluation.gateDecision,
+        riskScore: evaluation.riskScore,
+        healthScore: evaluation.healthScore,
+        repoId: evaluation.repoId,
+        prNumber: evaluation.prNumber,
+        prUrl,
+        commitSha: evaluation.commitSha,
+        riskFactors: evaluation.riskFactors,
+        healthChecks: evaluation.healthChecks,
+        reportUrl: evaluation.reportUrl,
+        timestamp: new Date().toISOString(),
+    };
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+            core.debug(`Webhook returned ${response.status} — notification may not have been delivered`);
+        }
+    }
+    catch (error) {
+        core.debug(`Webhook delivery failed: ${error}`);
+    }
+}
 
 
 /***/ }),

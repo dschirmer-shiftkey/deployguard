@@ -56,6 +56,9 @@ async function main() {
     riskThreshold: parseInt(flags["threshold"] ?? "70", 10),
     failMode: "open",
     selfHeal: false,
+    addRiskLabels: false,
+    reviewersOnRisk: [],
+    webhookEvents: [],
   };
 
   const commitSha = flags["sha"] ?? "0000000000000000000000000000000000000000";

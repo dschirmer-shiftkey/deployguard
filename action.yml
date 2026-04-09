@@ -34,6 +34,22 @@ inputs:
     description: "Attempt to auto-repair failing tests before blocking"
     required: false
     default: "true"
+  add-risk-labels:
+    description: "Auto-apply risk-level labels (deployguard:low-risk, etc.) to the PR"
+    required: false
+    default: "true"
+  reviewers-on-risk:
+    description: "Comma-separated GitHub usernames to request as reviewers when decision is warn or block"
+    required: false
+    default: ""
+  webhook-url:
+    description: "URL to POST gate evaluation results to (Slack, Discord, or custom endpoint)"
+    required: false
+    default: ""
+  webhook-events:
+    description: "Comma-separated decisions that trigger the webhook (e.g. warn,block)"
+    required: false
+    default: "warn,block"
 
 outputs:
   health-score:
@@ -44,6 +60,8 @@ outputs:
     description: "Gate decision: allow, warn, or block"
   report-url:
     description: "URL to the full evaluation report on the DeployGuard dashboard"
+  evaluation-json:
+    description: "Full gate evaluation as JSON for downstream workflow steps"
 
 runs:
   using: "node20"
