@@ -7,8 +7,10 @@ import type {
   GateDecision,
   GateEvaluation,
   HealthCheckResult,
+  RepoConfig,
   RiskFactor,
 } from "./types.js";
+import { loadRepoConfig, matchesGlobs } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // PR file metadata used for risk heuristics
@@ -96,7 +98,45 @@ export function isSensitiveFile(filename: string): boolean {
   return SENSITIVE_PATTERNS.some((p) => p.test(filename));
 }
 
-export function computeRiskScore(files: PrFileInfo[]): {
+const HIGH_SENSITIVITY_PATTERN = /(?:^|\/)(?:auth|security|payment|billing|webhook)/i;
+const INFRA_SENSITIVITY_PATTERN =
+  /(?:^|\/)(?:migrations|infrastructure|\.github\/workflows|secrets|\.env)/i;
+
+export function sensitivityWeight(
+  filename: string,
+  repoConfig?: RepoConfig | null,
+): number {
+  if (repoConfig) {
+    if (repoConfig.ignore.length > 0 && matchesGlobs(filename, repoConfig.ignore))
+      return 0;
+    if (
+      repoConfig.sensitivity.high.length > 0 &&
+      matchesGlobs(filename, repoConfig.sensitivity.high)
+    )
+      return 3;
+    if (
+      repoConfig.sensitivity.medium.length > 0 &&
+      matchesGlobs(filename, repoConfig.sensitivity.medium)
+    )
+      return 2;
+    if (
+      repoConfig.sensitivity.low.length > 0 &&
+      matchesGlobs(filename, repoConfig.sensitivity.low)
+    )
+      return 0.5;
+  }
+
+  if (isTestFile(filename)) return 0.3;
+  if (HIGH_SENSITIVITY_PATTERN.test(filename)) return 3;
+  if (INFRA_SENSITIVITY_PATTERN.test(filename)) return 2;
+  if (isNonSourceFile(filename)) return 0.5;
+  return 1;
+}
+
+export function computeRiskScore(
+  files: PrFileInfo[],
+  repoConfig?: RepoConfig | null,
+): {
   score: number;
   factors: RiskFactor[];
 } {
@@ -104,9 +144,19 @@ export function computeRiskScore(files: PrFileInfo[]): {
     return { score: 0, factors: [] };
   }
 
+  const effectiveFiles = repoConfig?.ignore.length
+    ? files.filter((f) => !matchesGlobs(f.filename, repoConfig.ignore))
+    : files;
+
+  if (effectiveFiles.length === 0) {
+    return { score: 0, factors: [] };
+  }
+
   const factors: RiskFactor[] = [];
 
-  const fileCount = files.length;
+  const customWeights = repoConfig?.weights ?? {};
+
+  const fileCount = effectiveFiles.length;
   const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
   factors.push({
     type: "file_count",
@@ -114,19 +164,27 @@ export function computeRiskScore(files: PrFileInfo[]): {
     detail: { fileCount, description: "Number of files changed" },
   });
 
-  const totalChanges = files.reduce((sum, f) => sum + f.changes, 0);
-  const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + totalChanges / 50)));
+  const totalChanges = effectiveFiles.reduce((sum, f) => sum + f.changes, 0);
+  const weightedChanges = effectiveFiles.reduce(
+    (sum, f) => sum + f.changes * sensitivityWeight(f.filename, repoConfig),
+    0,
+  );
+  const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + weightedChanges / 50)));
   factors.push({
     type: "code_churn",
     score: churnScore,
-    detail: { totalChanges, description: "Total lines changed" },
+    detail: {
+      totalChanges,
+      weightedChanges: Math.round(weightedChanges),
+      description: "Sensitivity-weighted lines changed",
+    },
   });
 
-  const testFileCount = files.filter((f) => isTestFile(f.filename)).length;
-  const nonSourceCount = files.filter(
+  const testFileCount = effectiveFiles.filter((f) => isTestFile(f.filename)).length;
+  const nonSourceCount = effectiveFiles.filter(
     (f) => !isTestFile(f.filename) && isNonSourceFile(f.filename),
   ).length;
-  const sourceFileCount = files.length - testFileCount - nonSourceCount;
+  const sourceFileCount = effectiveFiles.length - testFileCount - nonSourceCount;
   if (sourceFileCount > 0) {
     const testRatio = testFileCount / sourceFileCount;
     const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
@@ -142,7 +200,16 @@ export function computeRiskScore(files: PrFileInfo[]): {
     });
   }
 
-  const sensitiveFiles = files.filter((f) => isSensitiveFile(f.filename));
+  const sensitiveByConfig = repoConfig?.sensitivity.high.length
+    ? effectiveFiles.filter((f) => matchesGlobs(f.filename, repoConfig.sensitivity.high))
+    : [];
+  const sensitiveByDefault = effectiveFiles.filter((f) => isSensitiveFile(f.filename));
+  const sensitiveFilenames = new Set([
+    ...sensitiveByConfig.map((f) => f.filename),
+    ...sensitiveByDefault.map((f) => f.filename),
+  ]);
+  const sensitiveFiles = effectiveFiles.filter((f) => sensitiveFilenames.has(f.filename));
+
   if (sensitiveFiles.length > 0) {
     const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
     factors.push({
@@ -156,15 +223,18 @@ export function computeRiskScore(files: PrFileInfo[]): {
     });
   }
 
-  return { score: weightedAverageScores(factors), factors };
+  return { score: weightedAverageScores(factors, customWeights), factors };
 }
 
-function weightedAverageScores(factors: RiskFactor[]): number {
+function weightedAverageScores(
+  factors: RiskFactor[],
+  overrides?: Record<string, number>,
+): number {
   if (factors.length === 0) return 0;
   let totalWeight = 0;
   let weightedSum = 0;
   for (const f of factors) {
-    const w = FACTOR_WEIGHTS[f.type] ?? 1;
+    const w = overrides?.[f.type] ?? FACTOR_WEIGHTS[f.type] ?? 1;
     weightedSum += f.score * w;
     totalWeight += w;
   }
@@ -536,28 +606,45 @@ export async function evaluateGate(
 ): Promise<GateEvaluation> {
   const start = Date.now();
 
-  const [files, authorFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck] =
-    await Promise.all([
-      prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
-      prNumber && config.githubToken
-        ? computeAuthorHistory(prNumber, config.githubToken)
-        : Promise.resolve(null),
-      config.healthCheckUrls.length > 0
-        ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
-        : Promise.resolve([]),
-      checkVercelHealth(),
-      checkSupabaseHealth(),
-      checkMcpHealth(),
-    ]);
+  const [
+    files,
+    authorFactor,
+    httpHealthChecks,
+    vercelCheck,
+    supabaseCheck,
+    mcpCheck,
+    repoConfig,
+  ] = await Promise.all([
+    prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
+    prNumber && config.githubToken
+      ? computeAuthorHistory(prNumber, config.githubToken)
+      : Promise.resolve(null),
+    config.healthCheckUrls.length > 0
+      ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
+      : Promise.resolve([]),
+    checkVercelHealth(),
+    checkSupabaseHealth(),
+    checkMcpHealth(),
+    loadRepoConfig(config.githubToken),
+  ]);
 
-  const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files);
+  const effectiveRiskThreshold = repoConfig?.thresholds.risk ?? config.riskThreshold;
+  const effectiveWarnThreshold = repoConfig?.thresholds.warn ?? config.warnThreshold;
+
+  const { score: localRiskScore, factors: riskFactors } = computeRiskScore(
+    files,
+    repoConfig,
+  );
 
   if (authorFactor) {
     riskFactors.push(authorFactor);
   }
 
+  const customWeights = repoConfig?.weights ?? {};
   const riskScore =
-    riskFactors.length > 0 ? weightedAverageScores(riskFactors) : localRiskScore;
+    riskFactors.length > 0
+      ? weightedAverageScores(riskFactors, customWeights)
+      : localRiskScore;
 
   const healthChecks: HealthCheckResult[] = [...httpHealthChecks];
   if (vercelCheck) healthChecks.push(vercelCheck);
@@ -568,8 +655,8 @@ export async function evaluateGate(
   const gateDecision = decideGate(
     riskScore,
     healthScore,
-    config.riskThreshold,
-    config.warnThreshold,
+    effectiveRiskThreshold,
+    effectiveWarnThreshold,
   );
 
   const fileNames = files.map((f) => f.filename);
@@ -820,6 +907,53 @@ function buildScoreBar(score: number, threshold: number): string {
   return `\`${bar}\` ${score}/100 (threshold: ${threshold})`;
 }
 
+export function suggestSplitBoundaries(files: string[]): string[] {
+  if (files.length < 5) return [];
+
+  const groups: Record<string, string[]> = {};
+  for (const f of files) {
+    const parts = f.replace(/\\/g, "/").split("/");
+    let bucket: string;
+
+    if (parts[0] === ".github") {
+      bucket = "CI/workflow";
+    } else if (/^(migrations?|supabase)/i.test(parts[0])) {
+      bucket = "database/migrations";
+    } else if (parts.length >= 2) {
+      bucket = parts.slice(0, 2).join("/");
+    } else {
+      bucket = parts[0];
+    }
+
+    (groups[bucket] ??= []).push(f);
+  }
+
+  const sorted = Object.entries(groups)
+    .filter(([, v]) => v.length >= 2)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  if (sorted.length < 2) return [];
+
+  const suggestions: string[] = [];
+  const [first, second] = sorted;
+
+  suggestions.push(
+    `- **Suggested split:** \`${first[0]}/\` changes (${first[1].length} files) ` +
+      `could be a separate PR from \`${second[0]}/\` changes (${second[1].length} files).`,
+  );
+
+  if (sorted.length > 2) {
+    const rest = sorted.slice(2);
+    const restTotal = rest.reduce((sum, [, v]) => sum + v.length, 0);
+    suggestions.push(
+      `- ${rest.length} other group${rest.length > 1 ? "s" : ""} (${restTotal} files) ` +
+        `may also be separable: ${rest.map(([k, v]) => `\`${k}/\` (${v.length})`).join(", ")}.`,
+    );
+  }
+
+  return suggestions;
+}
+
 function buildGuidance(evaluation: GateEvaluation): string[] {
   if (evaluation.gateDecision === "allow") return [];
 
@@ -857,10 +991,21 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
   }
 
   const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
+  const shouldSuggestSplit =
+    (fileCountFactor && fileCountFactor.score >= 70) ||
+    (churnFactor && churnFactor.score >= 70);
+
   if (fileCountFactor && fileCountFactor.score >= 80) {
     lines.push(
       `- **Many files changed**. Large PRs are harder to review thoroughly — consider splitting.`,
     );
+  }
+
+  if (shouldSuggestSplit && evaluation.files && evaluation.files.length >= 5) {
+    const splits = suggestSplitBoundaries(evaluation.files);
+    if (splits.length > 0) {
+      lines.push(...splits);
+    }
   }
 
   if (lines.length === 2) {

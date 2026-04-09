@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   computeRiskScore,
   isSensitiveFile,
+  sensitivityWeight,
+  suggestSplitBoundaries,
   decideGate,
   checkHealth,
   checkVercelHealth,
@@ -235,6 +237,171 @@ describe("computeRiskScore", () => {
     expect(sensitiveF!.score).toBe(100);
     expect(result.score).toBeGreaterThanOrEqual(60);
   });
+
+  it("weights auth file churn at 3x (diff-aware scoring)", () => {
+    const normal = computeRiskScore([
+      { filename: "src/utils.ts", additions: 100, deletions: 0, changes: 100 },
+    ]);
+    const auth = computeRiskScore([
+      { filename: "src/auth/login.ts", additions: 100, deletions: 0, changes: 100 },
+    ]);
+    const normalChurn = normal.factors.find((f) => f.type === "code_churn")!;
+    const authChurn = auth.factors.find((f) => f.type === "code_churn")!;
+    expect(authChurn.score).toBeGreaterThan(normalChurn.score);
+    const authDetail = authChurn.detail as { weightedChanges: number };
+    expect(authDetail.weightedChanges).toBe(300);
+  });
+
+  it("weights test file churn at 0.3x (diff-aware scoring)", () => {
+    const result = computeRiskScore([
+      {
+        filename: "src/__tests__/app.test.ts",
+        additions: 500,
+        deletions: 0,
+        changes: 500,
+      },
+    ]);
+    const churn = result.factors.find((f) => f.type === "code_churn")!;
+    const detail = churn.detail as { weightedChanges: number };
+    expect(detail.weightedChanges).toBe(150);
+  });
+
+  it("weights config/non-source file churn at 0.5x", () => {
+    const result = computeRiskScore([
+      { filename: "README.md", additions: 200, deletions: 0, changes: 200 },
+    ]);
+    const churn = result.factors.find((f) => f.type === "code_churn")!;
+    const detail = churn.detail as { weightedChanges: number };
+    expect(detail.weightedChanges).toBe(100);
+  });
+
+  it("weights infrastructure file churn at 2x", () => {
+    const result = computeRiskScore([
+      { filename: ".github/workflows/ci.yml", additions: 50, deletions: 0, changes: 50 },
+    ]);
+    const churn = result.factors.find((f) => f.type === "code_churn")!;
+    const detail = churn.detail as { weightedChanges: number };
+    expect(detail.weightedChanges).toBe(100);
+  });
+
+  it("includes both totalChanges and weightedChanges in churn detail", () => {
+    const result = computeRiskScore([
+      { filename: "src/auth/login.ts", additions: 50, deletions: 0, changes: 50 },
+      { filename: "src/utils.ts", additions: 50, deletions: 0, changes: 50 },
+    ]);
+    const churn = result.factors.find((f) => f.type === "code_churn")!;
+    const detail = churn.detail as {
+      totalChanges: number;
+      weightedChanges: number;
+    };
+    expect(detail.totalChanges).toBe(100);
+    expect(detail.weightedChanges).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sensitivityWeight
+// ---------------------------------------------------------------------------
+
+describe("sensitivityWeight", () => {
+  it("returns 3 for auth files", () => {
+    expect(sensitivityWeight("src/auth/login.ts")).toBe(3);
+  });
+  it("returns 3 for payment files", () => {
+    expect(sensitivityWeight("src/payment/checkout.ts")).toBe(3);
+  });
+  it("returns 3 for security files", () => {
+    expect(sensitivityWeight("lib/security/validate.ts")).toBe(3);
+  });
+  it("returns 3 for billing files", () => {
+    expect(sensitivityWeight("billing/invoice.ts")).toBe(3);
+  });
+  it("returns 3 for webhook files", () => {
+    expect(sensitivityWeight("src/webhook/stripe.ts")).toBe(3);
+  });
+  it("returns 2 for migration files", () => {
+    expect(sensitivityWeight("supabase/migrations/001.sql")).toBe(2);
+  });
+  it("returns 2 for workflow files", () => {
+    expect(sensitivityWeight(".github/workflows/ci.yml")).toBe(2);
+  });
+  it("returns 2 for .env files", () => {
+    expect(sensitivityWeight(".env.production")).toBe(2);
+  });
+  it("returns 0.3 for test files", () => {
+    expect(sensitivityWeight("src/__tests__/utils.test.ts")).toBe(0.3);
+  });
+  it("returns 0.5 for non-source files", () => {
+    expect(sensitivityWeight("README.md")).toBe(0.5);
+    expect(sensitivityWeight("package.json")).toBe(0.5);
+    expect(sensitivityWeight("styles/main.css")).toBe(0.5);
+  });
+  it("returns 1 for regular source files", () => {
+    expect(sensitivityWeight("src/utils.ts")).toBe(1);
+    expect(sensitivityWeight("lib/helpers.js")).toBe(1);
+  });
+  it("prioritizes test detection over non-source for .test.ts files", () => {
+    expect(sensitivityWeight("src/auth.test.ts")).toBe(0.3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suggestSplitBoundaries
+// ---------------------------------------------------------------------------
+
+describe("suggestSplitBoundaries", () => {
+  it("returns empty for fewer than 5 files", () => {
+    expect(
+      suggestSplitBoundaries(["src/a.ts", "src/b.ts", "lib/c.ts", "lib/d.ts"]),
+    ).toEqual([]);
+  });
+
+  it("returns empty when all files are in the same group", () => {
+    const files = Array.from({ length: 10 }, (_, i) => `src/components/c${i}.tsx`);
+    expect(suggestSplitBoundaries(files)).toEqual([]);
+  });
+
+  it("suggests splitting two clear groups", () => {
+    const files = [
+      "src/components/Header.tsx",
+      "src/components/Footer.tsx",
+      "src/components/Nav.tsx",
+      "supabase/migrations/001.sql",
+      "supabase/migrations/002.sql",
+    ];
+    const suggestions = suggestSplitBoundaries(files);
+    expect(suggestions.length).toBeGreaterThanOrEqual(1);
+    expect(suggestions[0]).toContain("src/components/");
+    expect(suggestions[0]).toContain("separate PR");
+  });
+
+  it("groups .github files under CI/workflow", () => {
+    const files = [
+      ".github/workflows/ci.yml",
+      ".github/workflows/deploy.yml",
+      "src/app/page.tsx",
+      "src/app/layout.tsx",
+      "src/app/globals.css",
+    ];
+    const suggestions = suggestSplitBoundaries(files);
+    expect(suggestions.length).toBeGreaterThanOrEqual(1);
+    expect(suggestions[0]).toContain("CI/workflow");
+  });
+
+  it("reports additional groups when more than 2 exist", () => {
+    const files = [
+      "src/auth/login.ts",
+      "src/auth/signup.ts",
+      "src/auth/oauth.ts",
+      "lib/utils/format.ts",
+      "lib/utils/parse.ts",
+      "supabase/migrations/001.sql",
+      "supabase/migrations/002.sql",
+    ];
+    const suggestions = suggestSplitBoundaries(files);
+    expect(suggestions.length).toBe(2);
+    expect(suggestions[1]).toContain("also be separable");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -363,7 +530,11 @@ describe("formatGateReport", () => {
       {
         type: "code_churn",
         score: 30,
-        detail: { totalChanges: 150, description: "Total lines changed" },
+        detail: {
+          totalChanges: 150,
+          weightedChanges: 150,
+          description: "Sensitivity-weighted lines changed",
+        },
       },
     ],
     evaluationMs: 42,
@@ -391,7 +562,7 @@ describe("formatGateReport", () => {
   it("lists risk factors when present", () => {
     const report = formatGateReport(baseEvaluation);
     expect(report).toContain("code_churn");
-    expect(report).toContain("Total lines changed");
+    expect(report).toContain("Sensitivity-weighted lines changed");
   });
 
   it("lists health checks when present", () => {
@@ -486,7 +657,11 @@ describe("formatGateReport", () => {
         {
           type: "code_churn",
           score: 80,
-          detail: { totalChanges: 2000, description: "Total lines changed" },
+          detail: {
+            totalChanges: 2000,
+            weightedChanges: 2000,
+            description: "Sensitivity-weighted lines changed",
+          },
         },
       ],
     };
@@ -563,6 +738,35 @@ describe("formatGateReport", () => {
   it("omits guidance for allow decision", () => {
     const report = formatGateReport(baseEvaluation);
     expect(report).not.toContain("### Guidance");
+  });
+
+  it("includes split boundary suggestions when churn is high and files span multiple directories", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      gateDecision: "warn",
+      riskScore: 60,
+      riskFactors: [
+        {
+          type: "code_churn",
+          score: 80,
+          detail: {
+            totalChanges: 2000,
+            weightedChanges: 2000,
+            description: "Sensitivity-weighted lines changed",
+          },
+        },
+      ],
+      files: [
+        "src/components/Header.tsx",
+        "src/components/Footer.tsx",
+        "src/components/Nav.tsx",
+        "supabase/migrations/001.sql",
+        "supabase/migrations/002.sql",
+      ],
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("Suggested split");
+    expect(report).toContain("separate PR");
   });
 });
 
