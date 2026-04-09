@@ -23,9 +23,7 @@ function makeEvaluation(overrides: Partial<GateEvaluation> = {}): GateEvaluation
     riskScore: 85,
     gateDecision: "block",
     healthChecks: [],
-    riskFactors: [
-      { type: "code_churn", score: 80, detail: { totalChanges: 2000 } },
-    ],
+    riskFactors: [{ type: "code_churn", score: 80, detail: { totalChanges: 2000 } }],
     evaluationMs: 50,
     prNumber: 42,
     ...overrides,
@@ -53,9 +51,7 @@ describe("sendWebhook", () => {
       }),
     );
 
-    const body = JSON.parse(
-      vi.mocked(fetch).mock.calls[0][1]!.body as string,
-    );
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
     expect(body.decision).toBe("block");
     expect(body.riskScore).toBe(85);
     expect(body.healthScore).toBe(100);
@@ -70,9 +66,7 @@ describe("sendWebhook", () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("ok", { status: 200 }));
     await sendWebhook("https://hooks.slack.com/test", makeEvaluation());
 
-    const body = JSON.parse(
-      vi.mocked(fetch).mock.calls[0][1]!.body as string,
-    );
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
     expect(body.text).toContain("BLOCK");
     expect(body.text).toContain("risk 85/100");
     expect(body.text).toContain("PR #42");
@@ -85,17 +79,13 @@ describe("sendWebhook", () => {
       makeEvaluation({ prNumber: undefined }),
     );
 
-    const body = JSON.parse(
-      vi.mocked(fetch).mock.calls[0][1]!.body as string,
-    );
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
     expect(body.prUrl).toBeUndefined();
     expect(body.text).toContain("abc1234");
   });
 
   it("handles non-200 response gracefully (fail-open)", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response("error", { status: 500 }),
-    );
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("error", { status: 500 }));
     await expect(
       sendWebhook("https://hooks.slack.com/test", makeEvaluation()),
     ).resolves.toBeUndefined();

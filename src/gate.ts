@@ -1,8 +1,6 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import {
-  GateApiResponse as GateApiResponseSchema,
-} from "./types.js";
+import { GateApiResponse as GateApiResponseSchema } from "./types.js";
 import type {
   DeployGuardConfig,
   GateApiResponse,
@@ -117,10 +115,7 @@ export function computeRiskScore(files: PrFileInfo[]): {
   });
 
   const totalChanges = files.reduce((sum, f) => sum + f.changes, 0);
-  const churnScore = Math.min(
-    100,
-    Math.round(25 * Math.log2(1 + totalChanges / 50)),
-  );
+  const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + totalChanges / 50)));
   factors.push({
     type: "code_churn",
     score: churnScore,
@@ -438,9 +433,7 @@ export async function evaluateGate(
     prNumber && config.githubToken
       ? computeAuthorHistory(prNumber, config.githubToken)
       : Promise.resolve(null),
-    config.healthCheckUrl
-      ? checkHealth(config.healthCheckUrl)
-      : Promise.resolve(null),
+    config.healthCheckUrl ? checkHealth(config.healthCheckUrl) : Promise.resolve(null),
     checkMcpHealth(),
   ]);
 
@@ -580,8 +573,14 @@ export async function createCheckRun(
 
 const RISK_LABELS: Record<string, { color: string; description: string }> = {
   "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
-  "deployguard:medium-risk": { color: "fbca04", description: "DeployGuard: medium risk score" },
-  "deployguard:high-risk": { color: "d93f0b", description: "DeployGuard: high risk score" },
+  "deployguard:medium-risk": {
+    color: "fbca04",
+    description: "DeployGuard: medium risk score",
+  },
+  "deployguard:high-risk": {
+    color: "d93f0b",
+    description: "DeployGuard: high risk score",
+  },
 };
 
 function riskLabelForDecision(decision: GateDecision): string {
@@ -632,7 +631,11 @@ export async function managePrLabels(
     });
 
     for (const label of currentLabels) {
-      if (label.name.startsWith("deployguard:") && label.name.endsWith("-risk") && label.name !== targetLabel) {
+      if (
+        label.name.startsWith("deployguard:") &&
+        label.name.endsWith("-risk") &&
+        label.name !== targetLabel
+      ) {
         await octokit.rest.issues.removeLabel({
           owner,
           repo,
@@ -747,14 +750,19 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
   }
 
   if (lines.length === 2) {
-    lines.push(`- Risk score exceeds threshold. Review the risk factors above before proceeding.`);
+    lines.push(
+      `- Risk score exceeds threshold. Review the risk factors above before proceeding.`,
+    );
   }
 
   lines.push(``);
   return lines;
 }
 
-export function formatGateReport(evaluation: GateEvaluation, riskThreshold?: number): string {
+export function formatGateReport(
+  evaluation: GateEvaluation,
+  riskThreshold?: number,
+): string {
   const healthDisplay =
     evaluation.healthChecks.length > 0
       ? `${evaluation.healthScore}/100`
@@ -801,9 +809,7 @@ export function formatGateReport(evaluation: GateEvaluation, riskThreshold?: num
   }
 
   if (evaluation.files && evaluation.files.length > 0) {
-    const sensitiveSet = new Set(
-      evaluation.files.filter((f) => isSensitiveFile(f)),
-    );
+    const sensitiveSet = new Set(evaluation.files.filter((f) => isSensitiveFile(f)));
     lines.push(
       `<details><summary>Files changed (${evaluation.files.length})</summary>`,
       ``,

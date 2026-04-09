@@ -54,37 +54,37 @@ jobs:
 
 ### Inputs
 
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `api-key` | Yes | — | DeployGuard API key from komatik.xyz dashboard |
-| `github-token` | No | `${{ github.token }}` | GitHub token for PR analysis |
-| `health-check-url` | No | — | Production health check URL |
-| `risk-threshold` | No | `70` | Block deployment if risk score exceeds this |
-| `warn-threshold` | No | `risk-threshold - 15` | Warn if risk score exceeds this |
-| `fail-mode` | No | `open` | Behavior when unreachable: `open` or `closed` |
-| `self-heal` | No | `true` | Attempt auto-repair of failing tests |
-| `add-risk-labels` | No | `true` | Auto-apply `deployguard:low/medium/high-risk` labels to PRs |
-| `reviewers-on-risk` | No | — | Comma-separated usernames to request as reviewers on warn/block |
-| `webhook-url` | No | — | URL to POST evaluation results (Slack, Discord, etc.) |
-| `webhook-events` | No | `warn,block` | Decisions that trigger the webhook |
+| Input               | Required | Default               | Description                                                     |
+| ------------------- | -------- | --------------------- | --------------------------------------------------------------- |
+| `api-key`           | Yes      | —                     | DeployGuard API key from komatik.xyz dashboard                  |
+| `github-token`      | No       | `${{ github.token }}` | GitHub token for PR analysis                                    |
+| `health-check-url`  | No       | —                     | Production health check URL                                     |
+| `risk-threshold`    | No       | `70`                  | Block deployment if risk score exceeds this                     |
+| `warn-threshold`    | No       | `risk-threshold - 15` | Warn if risk score exceeds this                                 |
+| `fail-mode`         | No       | `open`                | Behavior when unreachable: `open` or `closed`                   |
+| `self-heal`         | No       | `true`                | Attempt auto-repair of failing tests                            |
+| `add-risk-labels`   | No       | `true`                | Auto-apply `deployguard:low/medium/high-risk` labels to PRs     |
+| `reviewers-on-risk` | No       | —                     | Comma-separated usernames to request as reviewers on warn/block |
+| `webhook-url`       | No       | —                     | URL to POST evaluation results (Slack, Discord, etc.)           |
+| `webhook-events`    | No       | `warn,block`          | Decisions that trigger the webhook                              |
 
 ### Outputs
 
-| Output | Description |
-|--------|-------------|
-| `health-score` | Infrastructure health score (0–100) |
-| `risk-score` | Code risk score (0–100) |
-| `gate-decision` | `allow`, `warn`, or `block` |
-| `report-url` | URL to full report on DeployGuard dashboard |
+| Output            | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `health-score`    | Infrastructure health score (0–100)               |
+| `risk-score`      | Code risk score (0–100)                           |
+| `gate-decision`   | `allow`, `warn`, or `block`                       |
+| `report-url`      | URL to full report on DeployGuard dashboard       |
 | `evaluation-json` | Full gate evaluation as JSON for downstream steps |
 
 ### Permissions
 
-| Permission | Required for |
-|------------|-------------|
-| `checks: write` | GitHub Check Run (appears in PR Checks tab) |
+| Permission             | Required for                                |
+| ---------------------- | ------------------------------------------- |
+| `checks: write`        | GitHub Check Run (appears in PR Checks tab) |
 | `pull-requests: write` | PR comments, risk labels, reviewer requests |
-| `contents: read` | Reading PR file metadata |
+| `contents: read`       | Reading PR file metadata                    |
 
 ---
 

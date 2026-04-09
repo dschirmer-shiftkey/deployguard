@@ -202,9 +202,7 @@ describe("evaluateGate (integration)", () => {
   });
 
   it("falls back to local evaluation when gate API returns non-200", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response("server error", { status: 500 }),
-    );
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("server error", { status: 500 }));
     const config = makeConfig({ githubToken: "ghp_test" });
     const result = await evaluateGate(config, "abc1234567890", 42);
 

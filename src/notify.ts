@@ -23,7 +23,9 @@ export async function sendWebhook(
   const slackText =
     `${emoji} DeployGuard *${evaluation.gateDecision.toUpperCase()}* — ` +
     `risk ${evaluation.riskScore}/100` +
-    (prUrl ? ` | <${prUrl}|PR #${evaluation.prNumber}>` : ` | ${evaluation.commitSha.substring(0, 7)}`) +
+    (prUrl
+      ? ` | <${prUrl}|PR #${evaluation.prNumber}>`
+      : ` | ${evaluation.commitSha.substring(0, 7)}`) +
     ` on \`${evaluation.repoId}\``;
 
   const payload = {
@@ -50,7 +52,9 @@ export async function sendWebhook(
     });
 
     if (!response.ok) {
-      core.debug(`Webhook returned ${response.status} — notification may not have been delivered`);
+      core.debug(
+        `Webhook returned ${response.status} — notification may not have been delivered`,
+      );
     }
   } catch (error) {
     core.debug(`Webhook delivery failed: ${error}`);

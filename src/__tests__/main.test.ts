@@ -97,9 +97,7 @@ vi.mock("../healers/cypress.js", () => ({
   cypressHealer: { name: "cypress" },
 }));
 
-function makeEvaluation(
-  overrides: Partial<GateEvaluation> = {},
-): GateEvaluation {
+function makeEvaluation(overrides: Partial<GateEvaluation> = {}): GateEvaluation {
   return {
     id: "dg-abc1234-1234567890",
     repoId: "test-owner/test-repo",
@@ -187,11 +185,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(makeEvaluation());
     await runMain();
 
-    expect(mockPostPrComment).toHaveBeenCalledWith(
-      "## Report",
-      42,
-      "ghp_test",
-    );
+    expect(mockPostPrComment).toHaveBeenCalledWith("## Report", 42, "ghp_test");
   });
 
   it("creates check run when token is available", async () => {
@@ -200,11 +194,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(eval_);
     await runMain();
 
-    expect(mockCreateCheckRun).toHaveBeenCalledWith(
-      eval_,
-      "## Report",
-      "ghp_test",
-    );
+    expect(mockCreateCheckRun).toHaveBeenCalledWith(eval_, "## Report", "ghp_test");
   });
 
   it("manages PR labels when token and prNumber are available", async () => {
@@ -311,11 +301,7 @@ describe("run (main entrypoint)", () => {
     );
     await runMain();
 
-    expect(mockRequestHighRiskReviewers).toHaveBeenCalledWith(
-      42,
-      ["alice"],
-      "ghp_test",
-    );
+    expect(mockRequestHighRiskReviewers).toHaveBeenCalledWith(42, ["alice"], "ghp_test");
   });
 
   it("does not request reviewers on allow", async () => {
@@ -341,10 +327,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(eval_);
     await runMain();
 
-    expect(mockSendWebhook).toHaveBeenCalledWith(
-      "https://hooks.slack.com/test",
-      eval_,
-    );
+    expect(mockSendWebhook).toHaveBeenCalledWith("https://hooks.slack.com/test", eval_);
   });
 
   it("does not send webhook when decision does not match webhook-events", async () => {
@@ -374,9 +357,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockRejectedValue(new Error("API down"));
     await runMain();
 
-    expect(mockWarning).toHaveBeenCalledWith(
-      expect.stringContaining("fail-open"),
-    );
+    expect(mockWarning).toHaveBeenCalledWith(expect.stringContaining("fail-open"));
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
@@ -385,9 +366,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockRejectedValue(new Error("API down"));
     await runMain();
 
-    expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining("fail-closed"),
-    );
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining("fail-closed"));
   });
 
   it("defaults to fail-open when fail-mode input is empty", async () => {
@@ -395,9 +374,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockRejectedValue(new Error("boom"));
     await runMain();
 
-    expect(mockWarning).toHaveBeenCalledWith(
-      expect.stringContaining("fail-open"),
-    );
+    expect(mockWarning).toHaveBeenCalledWith(expect.stringContaining("fail-open"));
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 

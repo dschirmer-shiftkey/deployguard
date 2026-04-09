@@ -192,9 +192,19 @@ describe("computeRiskScore", () => {
 
   it("detects sensitive files and produces a sensitive_files factor", () => {
     const result = computeRiskScore([
-      { filename: "supabase/migrations/001.sql", additions: 20, deletions: 0, changes: 20 },
+      {
+        filename: "supabase/migrations/001.sql",
+        additions: 20,
+        deletions: 0,
+        changes: 20,
+      },
       { filename: "src/auth/login.ts", additions: 30, deletions: 0, changes: 30 },
-      { filename: "src/api/payment/checkout.ts", additions: 40, deletions: 0, changes: 40 },
+      {
+        filename: "src/api/payment/checkout.ts",
+        additions: 40,
+        deletions: 0,
+        changes: 40,
+      },
       { filename: "src/utils.ts", additions: 5, deletions: 0, changes: 5 },
     ]);
     const sensitive = result.factors.find((f) => f.type === "sensitive_files");
@@ -402,11 +412,7 @@ describe("formatGateReport", () => {
   it("includes collapsed file list with sensitive markers", () => {
     const evaluation: GateEvaluation = {
       ...baseEvaluation,
-      files: [
-        "src/utils.ts",
-        "src/auth/login.ts",
-        "supabase/migrations/001.sql",
-      ],
+      files: ["src/utils.ts", "src/auth/login.ts", "supabase/migrations/001.sql"],
     };
     const report = formatGateReport(evaluation);
     expect(report).toContain("Files changed (3)");
@@ -527,7 +533,11 @@ describe("formatGateReport", () => {
       gateDecision: "block",
       riskScore: 80,
       riskFactors: [
-        { type: "file_count", score: 90, detail: { fileCount: 50, description: "Files changed" } },
+        {
+          type: "file_count",
+          score: 90,
+          detail: { fileCount: 50, description: "Files changed" },
+        },
       ],
     };
     const report = formatGateReport(evaluation);
@@ -630,9 +640,7 @@ describe("checkMcpHealth", () => {
   it("returns warn when MCP returns non-200", async () => {
     process.env.MCP_GATEWAY_URL = "https://mcp.example.com";
     process.env.MCP_GATEWAY_KEY = "test-key";
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response("error", { status: 500 }),
-    );
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("error", { status: 500 }));
     const result = await checkMcpHealth();
     expect(result!.status).toBe("warn");
     expect(result!.detail).toHaveProperty("httpStatus", 500);
@@ -770,9 +778,7 @@ describe("managePrLabels", () => {
 
   it("handles API errors gracefully", async () => {
     mockListLabelsOnIssue.mockRejectedValue(new Error("forbidden"));
-    await expect(
-      managePrLabels(42, "allow", "ghp_test"),
-    ).resolves.toBeUndefined();
+    await expect(managePrLabels(42, "allow", "ghp_test")).resolves.toBeUndefined();
   });
 });
 
@@ -845,9 +851,7 @@ describe("postPrComment", () => {
 
   it("updates an existing comment when marker is found", async () => {
     mockListComments.mockResolvedValue({
-      data: [
-        { id: 999, body: "<!-- deployguard-gate-report -->\nold report" },
-      ],
+      data: [{ id: 999, body: "<!-- deployguard-gate-report -->\nold report" }],
     });
     await postPrComment("## Updated Report", 42, "ghp_test");
 
@@ -862,8 +866,6 @@ describe("postPrComment", () => {
 
   it("handles API errors gracefully without throwing", async () => {
     mockListComments.mockRejectedValue(new Error("GitHub API error"));
-    await expect(
-      postPrComment("## Report", 42, "ghp_test"),
-    ).resolves.toBeUndefined();
+    await expect(postPrComment("## Report", 42, "ghp_test")).resolves.toBeUndefined();
   });
 });

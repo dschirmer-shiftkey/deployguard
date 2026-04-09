@@ -91,11 +91,17 @@ async function run(): Promise<void> {
       selfHeal: core.getInput("self-heal") !== "false",
       addRiskLabels: core.getInput("add-risk-labels") !== "false",
       reviewersOnRisk: core.getInput("reviewers-on-risk")
-        ? core.getInput("reviewers-on-risk").split(",").map((s) => s.trim()).filter(Boolean)
+        ? core
+            .getInput("reviewers-on-risk")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
         : [],
       webhookUrl: core.getInput("webhook-url") || undefined,
       webhookEvents: (core.getInput("webhook-events") || "warn,block")
-        .split(",").map((s) => s.trim()).filter(Boolean),
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     };
 
     const context = github.context;
@@ -139,7 +145,11 @@ async function run(): Promise<void> {
       case "warn":
         core.warning(report);
         if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
-          await requestHighRiskReviewers(prNumber, config.reviewersOnRisk, config.githubToken);
+          await requestHighRiskReviewers(
+            prNumber,
+            config.reviewersOnRisk,
+            config.githubToken,
+          );
         }
         if (config.selfHeal && prNumber) {
           const repairs = await runSelfHeal(config, prNumber);
@@ -153,7 +163,11 @@ async function run(): Promise<void> {
         break;
       case "block":
         if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
-          await requestHighRiskReviewers(prNumber, config.reviewersOnRisk, config.githubToken);
+          await requestHighRiskReviewers(
+            prNumber,
+            config.reviewersOnRisk,
+            config.githubToken,
+          );
         }
         if (config.selfHeal && prNumber) {
           const repairs = await runSelfHeal(config, prNumber);

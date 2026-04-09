@@ -30324,9 +30324,7 @@ async function evaluateGate(config, commitSha, prNumber) {
         prNumber && config.githubToken
             ? computeAuthorHistory(prNumber, config.githubToken)
             : Promise.resolve(null),
-        config.healthCheckUrl
-            ? checkHealth(config.healthCheckUrl)
-            : Promise.resolve(null),
+        config.healthCheckUrl ? checkHealth(config.healthCheckUrl) : Promise.resolve(null),
         checkMcpHealth(),
     ]);
     const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files);
@@ -30437,8 +30435,14 @@ async function createCheckRun(evaluation, report, token) {
 // ---------------------------------------------------------------------------
 const RISK_LABELS = {
     "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
-    "deployguard:medium-risk": { color: "fbca04", description: "DeployGuard: medium risk score" },
-    "deployguard:high-risk": { color: "d93f0b", description: "DeployGuard: high risk score" },
+    "deployguard:medium-risk": {
+        color: "fbca04",
+        description: "DeployGuard: medium risk score",
+    },
+    "deployguard:high-risk": {
+        color: "d93f0b",
+        description: "DeployGuard: high risk score",
+    },
 };
 function riskLabelForDecision(decision) {
     switch (decision) {
@@ -30480,7 +30484,9 @@ async function managePrLabels(prNumber, decision, token) {
             issue_number: prNumber,
         });
         for (const label of currentLabels) {
-            if (label.name.startsWith("deployguard:") && label.name.endsWith("-risk") && label.name !== targetLabel) {
+            if (label.name.startsWith("deployguard:") &&
+                label.name.endsWith("-risk") &&
+                label.name !== targetLabel) {
                 await octokit.rest.issues.removeLabel({
                     owner,
                     repo,
@@ -31102,11 +31108,17 @@ async function run() {
             selfHeal: core.getInput("self-heal") !== "false",
             addRiskLabels: core.getInput("add-risk-labels") !== "false",
             reviewersOnRisk: core.getInput("reviewers-on-risk")
-                ? core.getInput("reviewers-on-risk").split(",").map((s) => s.trim()).filter(Boolean)
+                ? core
+                    .getInput("reviewers-on-risk")
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
                 : [],
             webhookUrl: core.getInput("webhook-url") || undefined,
             webhookEvents: (core.getInput("webhook-events") || "warn,block")
-                .split(",").map((s) => s.trim()).filter(Boolean),
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
         };
         const context = github.context;
         const commitSha = context.sha;
@@ -31243,7 +31255,9 @@ async function sendWebhook(url, evaluation) {
     const emoji = decisionEmoji[evaluation.gateDecision] ?? "";
     const slackText = `${emoji} DeployGuard *${evaluation.gateDecision.toUpperCase()}* — ` +
         `risk ${evaluation.riskScore}/100` +
-        (prUrl ? ` | <${prUrl}|PR #${evaluation.prNumber}>` : ` | ${evaluation.commitSha.substring(0, 7)}`) +
+        (prUrl
+            ? ` | <${prUrl}|PR #${evaluation.prNumber}>`
+            : ` | ${evaluation.commitSha.substring(0, 7)}`) +
         ` on \`${evaluation.repoId}\``;
     const payload = {
         text: slackText,
