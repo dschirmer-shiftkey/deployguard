@@ -30,22 +30,27 @@ interface PrFileInfo {
 async function fetchPrFiles(prNumber: number, token?: string): Promise<PrFileInfo[]> {
   if (!token) return [];
 
-  const octokit = github.getOctokit(token);
-  const { owner, repo } = github.context.repo;
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
 
-  const { data: files } = await octokit.rest.pulls.listFiles({
-    owner,
-    repo,
-    pull_number: prNumber,
-    per_page: 300,
-  });
+    const { data: files } = await octokit.rest.pulls.listFiles({
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: 300,
+    });
 
-  return files.map((f) => ({
-    filename: f.filename,
-    additions: f.additions,
-    deletions: f.deletions,
-    changes: f.changes,
-  }));
+    return files.map((f) => ({
+      filename: f.filename,
+      additions: f.additions,
+      deletions: f.deletions,
+      changes: f.changes,
+    }));
+  } catch (error) {
+    core.debug(`Failed to fetch PR files: ${error}`);
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
