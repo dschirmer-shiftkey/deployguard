@@ -4,12 +4,12 @@
  *
  * Usage:
  *   npx tsx scripts/simulate.ts
+ *   npx tsx scripts/simulate.ts --repo dschirmer-shiftkey/Komatik --pr 625
  *   npx tsx scripts/simulate.ts --health-url https://api.example.com/health
  *   npx tsx scripts/simulate.ts --threshold 50
  *
  * Environment variables (optional):
  *   GITHUB_TOKEN       — enables PR file fetching
- *   GITHUB_REPOSITORY  — owner/repo (default: dschirmer-shiftkey/deployguard)
  *   PR_NUMBER          — pull request number to evaluate
  */
 
@@ -27,9 +27,13 @@ function parseArgs() {
 async function main() {
   const flags = parseArgs();
 
-  const [owner, repo] = (
-    process.env.GITHUB_REPOSITORY ?? "dschirmer-shiftkey/deployguard"
-  ).split("/");
+  const targetRepo =
+    flags["repo"] ??
+    process.env.DEPLOYGUARD_TARGET_REPO ??
+    process.env.GITHUB_REPOSITORY ??
+    "dschirmer-shiftkey/deployguard";
+
+  const [owner, repo] = targetRepo.split("/");
 
   process.env.GITHUB_REPOSITORY = `${owner}/${repo}`;
 
@@ -41,7 +45,6 @@ async function main() {
   }
 
   const { evaluateGate, formatGateReport } = await import("../src/gate.js");
-  const { DeployGuardConfig } = await import("../src/types.js");
 
   type DeployGuardConfig = import("../src/types.js").DeployGuardConfig;
 

@@ -44,10 +44,10 @@ jobs:
         id: gate
         env:
           GITHUB_TOKEN: ${{ secrets[inputs.token-secret] || secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ inputs.target-repo }}
         run: |
           set +e
           OUTPUT=$(npx tsx scripts/simulate.ts \
+            --repo "${{ inputs.target-repo }}" \
             --pr "${{ inputs.pr-number }}" \
             --threshold "${{ inputs.risk-threshold }}" \
             ${{ inputs.health-check-url && format('--health-url {0}', inputs.health-check-url) || '' }} \
