@@ -138,6 +138,49 @@ GitHub Action → Gate Evaluation
 
 ---
 
+## Per-Repo Configuration
+
+Drop a `.deployguard.yml` at your repo root to customize risk scoring:
+
+```yaml
+# .deployguard.yml
+sensitivity:
+  high:
+    - "src/auth/**"
+    - "src/payments/**"
+    - "infrastructure/**"
+  medium:
+    - "supabase/migrations/**"
+  low:
+    - "docs/**"
+    - "*.md"
+    - "*.css"
+weights:
+  code_churn: 3
+  test_coverage: 4
+  file_count: 1
+  sensitive_files: 5
+  author_history: 1
+thresholds:
+  risk: 65
+  warn: 45
+ignore:
+  - "package-lock.json"
+  - "*.generated.ts"
+```
+
+| Field                | Description                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `sensitivity.high`   | Glob patterns for 3x churn weight                                                                                   |
+| `sensitivity.medium` | Glob patterns for 2x churn weight                                                                                   |
+| `sensitivity.low`    | Glob patterns for 0.5x churn weight                                                                                 |
+| `weights`            | Override factor weights (default: code_churn=3, test_coverage=2, file_count=2, sensitive_files=3, author_history=1) |
+| `thresholds.risk`    | Override the `risk-threshold` input                                                                                 |
+| `thresholds.warn`    | Override the `warn-threshold` input                                                                                 |
+| `ignore`             | Glob patterns for files to exclude from scoring entirely                                                            |
+
+---
+
 ## Development
 
 ```bash

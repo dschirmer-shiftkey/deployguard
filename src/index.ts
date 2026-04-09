@@ -3,6 +3,8 @@ export {
   formatGateReport,
   computeRiskScore,
   isSensitiveFile,
+  sensitivityWeight,
+  suggestSplitBoundaries,
   checkHealth,
   checkVercelHealth,
   checkSupabaseHealth,
@@ -23,12 +25,14 @@ export {
 export { jestHealer } from "./healers/jest.js";
 export { playwrightHealer } from "./healers/playwright.js";
 export { cypressHealer } from "./healers/cypress.js";
+export { loadRepoConfig, matchesGlobs } from "./config.js";
 export type {
   GateEvaluation,
   GateDecision,
   GateApiResponse,
   HealthCheckResult,
   RiskFactor,
+  RepoConfig,
   DeployGuardConfig,
   TestRepairResult,
 } from "./types.js";

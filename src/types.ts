@@ -51,6 +51,25 @@ export const GateApiResponse = z.object({
 });
 export type GateApiResponse = z.infer<typeof GateApiResponse>;
 
+export const RepoConfig = z.object({
+  sensitivity: z
+    .object({
+      high: z.array(z.string()).default([]),
+      medium: z.array(z.string()).default([]),
+      low: z.array(z.string()).default([]),
+    })
+    .default({}),
+  weights: z.record(z.number().min(0).max(10)).default({}),
+  thresholds: z
+    .object({
+      risk: z.number().min(0).max(100).optional(),
+      warn: z.number().min(0).max(100).optional(),
+    })
+    .default({}),
+  ignore: z.array(z.string()).default([]),
+});
+export type RepoConfig = z.infer<typeof RepoConfig>;
+
 export interface DeployGuardConfig {
   apiKey: string;
   apiUrl: string;

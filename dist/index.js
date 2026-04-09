@@ -29922,6 +29922,170 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
+/***/ 2973:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.loadRepoConfig = loadRepoConfig;
+exports.matchesGlobs = matchesGlobs;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+const types_js_1 = __nccwpck_require__(8522);
+const yamlParse = null;
+function parseYaml(input) {
+    if (yamlParse)
+        return yamlParse(input);
+    const lines = input.split("\n");
+    const result = {};
+    let currentKey = "";
+    let currentArray = null;
+    for (const raw of lines) {
+        const line = raw.replace(/\r$/, "");
+        if (line.trim() === "" || line.trim().startsWith("#"))
+            continue;
+        const topMatch = line.match(/^(\w[\w-]*):\s*(.*)$/);
+        if (topMatch) {
+            if (currentKey && currentArray) {
+                result[currentKey] = currentArray;
+                currentArray = null;
+            }
+            const [, key, val] = topMatch;
+            currentKey = key;
+            if (val && val.trim()) {
+                const numVal = Number(val.trim());
+                result[key] = isNaN(numVal) ? val.trim() : numVal;
+            }
+            continue;
+        }
+        const nestedObjMatch = line.match(/^\s{2}(\w[\w-]*):\s*(.*)$/);
+        if (nestedObjMatch) {
+            if (currentArray) {
+                result[currentKey] = currentArray;
+                currentArray = null;
+            }
+            const [, subKey, subVal] = nestedObjMatch;
+            if (typeof result[currentKey] !== "object" || Array.isArray(result[currentKey])) {
+                result[currentKey] = {};
+            }
+            const obj = result[currentKey];
+            if (subVal && subVal.trim()) {
+                const numVal = Number(subVal.trim());
+                obj[subKey] = isNaN(numVal) ? subVal.trim() : numVal;
+            }
+            else {
+                obj[subKey] = [];
+            }
+            continue;
+        }
+        const arrayItemMatch = line.match(/^\s+-\s+"?([^"]*)"?\s*$/);
+        if (arrayItemMatch) {
+            const val = arrayItemMatch[1];
+            if (currentKey &&
+                typeof result[currentKey] === "object" &&
+                !Array.isArray(result[currentKey])) {
+                const obj = result[currentKey];
+                const keys = Object.keys(obj);
+                const lastKey = keys[keys.length - 1];
+                if (lastKey && Array.isArray(obj[lastKey])) {
+                    obj[lastKey].push(val);
+                }
+            }
+            else {
+                if (!currentArray)
+                    currentArray = [];
+                currentArray.push(val);
+            }
+            continue;
+        }
+    }
+    if (currentKey && currentArray) {
+        result[currentKey] = currentArray;
+    }
+    return result;
+}
+async function loadRepoConfig(token) {
+    if (!token)
+        return null;
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const { data } = await octokit.rest.repos.getContent({
+            owner,
+            repo,
+            path: ".deployguard.yml",
+        });
+        if (Array.isArray(data) || data.type !== "file" || !data.content) {
+            return null;
+        }
+        const content = Buffer.from(data.content, "base64").toString("utf-8");
+        const raw = parseYaml(content);
+        const parsed = types_js_1.RepoConfig.safeParse(raw);
+        if (!parsed.success) {
+            core.warning(`.deployguard.yml parse error: ${parsed.error.message} — using defaults`);
+            return null;
+        }
+        core.debug(`Loaded .deployguard.yml: ${JSON.stringify(parsed.data)}`);
+        return parsed.data;
+    }
+    catch (error) {
+        const msg = String(error);
+        if (!msg.includes("404") && !msg.includes("Not Found")) {
+            core.debug(`.deployguard.yml load failed: ${msg}`);
+        }
+        return null;
+    }
+}
+function globToRegex(pattern) {
+    const escaped = pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*\*/g, "<<GLOBSTAR>>")
+        .replace(/\*/g, "[^/]*")
+        .replace(/<<GLOBSTAR>>/g, ".*")
+        .replace(/\?/g, ".");
+    return new RegExp(`^${escaped}$`, "i");
+}
+function matchesGlobs(filename, patterns) {
+    return patterns.some((p) => globToRegex(p).test(filename));
+}
+
+
+/***/ }),
+
 /***/ 1956:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -29962,6 +30126,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.isSensitiveFile = isSensitiveFile;
+exports.sensitivityWeight = sensitivityWeight;
 exports.computeRiskScore = computeRiskScore;
 exports.checkHealth = checkHealth;
 exports.checkMcpHealth = checkMcpHealth;
@@ -29973,10 +30138,12 @@ exports.postPrComment = postPrComment;
 exports.createCheckRun = createCheckRun;
 exports.managePrLabels = managePrLabels;
 exports.requestHighRiskReviewers = requestHighRiskReviewers;
+exports.suggestSplitBoundaries = suggestSplitBoundaries;
 exports.formatGateReport = formatGateReport;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const types_js_1 = __nccwpck_require__(8522);
+const config_js_1 = __nccwpck_require__(2973);
 // ---------------------------------------------------------------------------
 // PR diff fetching via @actions/github
 // ---------------------------------------------------------------------------
@@ -30040,28 +30207,66 @@ function isNonSourceFile(filename) {
 function isSensitiveFile(filename) {
     return SENSITIVE_PATTERNS.some((p) => p.test(filename));
 }
-function computeRiskScore(files) {
+const HIGH_SENSITIVITY_PATTERN = /(?:^|\/)(?:auth|security|payment|billing|webhook)/i;
+const INFRA_SENSITIVITY_PATTERN = /(?:^|\/)(?:migrations|infrastructure|\.github\/workflows|secrets|\.env)/i;
+function sensitivityWeight(filename, repoConfig) {
+    if (repoConfig) {
+        if (repoConfig.ignore.length > 0 && (0, config_js_1.matchesGlobs)(filename, repoConfig.ignore))
+            return 0;
+        if (repoConfig.sensitivity.high.length > 0 &&
+            (0, config_js_1.matchesGlobs)(filename, repoConfig.sensitivity.high))
+            return 3;
+        if (repoConfig.sensitivity.medium.length > 0 &&
+            (0, config_js_1.matchesGlobs)(filename, repoConfig.sensitivity.medium))
+            return 2;
+        if (repoConfig.sensitivity.low.length > 0 &&
+            (0, config_js_1.matchesGlobs)(filename, repoConfig.sensitivity.low))
+            return 0.5;
+    }
+    if (isTestFile(filename))
+        return 0.3;
+    if (HIGH_SENSITIVITY_PATTERN.test(filename))
+        return 3;
+    if (INFRA_SENSITIVITY_PATTERN.test(filename))
+        return 2;
+    if (isNonSourceFile(filename))
+        return 0.5;
+    return 1;
+}
+function computeRiskScore(files, repoConfig) {
     if (files.length === 0) {
         return { score: 0, factors: [] };
     }
+    const effectiveFiles = repoConfig?.ignore.length
+        ? files.filter((f) => !(0, config_js_1.matchesGlobs)(f.filename, repoConfig.ignore))
+        : files;
+    if (effectiveFiles.length === 0) {
+        return { score: 0, factors: [] };
+    }
     const factors = [];
-    const fileCount = files.length;
+    const customWeights = repoConfig?.weights ?? {};
+    const fileCount = effectiveFiles.length;
     const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
     factors.push({
         type: "file_count",
         score: fileCountScore,
         detail: { fileCount, description: "Number of files changed" },
     });
-    const totalChanges = files.reduce((sum, f) => sum + f.changes, 0);
-    const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + totalChanges / 50)));
+    const totalChanges = effectiveFiles.reduce((sum, f) => sum + f.changes, 0);
+    const weightedChanges = effectiveFiles.reduce((sum, f) => sum + f.changes * sensitivityWeight(f.filename, repoConfig), 0);
+    const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + weightedChanges / 50)));
     factors.push({
         type: "code_churn",
         score: churnScore,
-        detail: { totalChanges, description: "Total lines changed" },
+        detail: {
+            totalChanges,
+            weightedChanges: Math.round(weightedChanges),
+            description: "Sensitivity-weighted lines changed",
+        },
     });
-    const testFileCount = files.filter((f) => isTestFile(f.filename)).length;
-    const nonSourceCount = files.filter((f) => !isTestFile(f.filename) && isNonSourceFile(f.filename)).length;
-    const sourceFileCount = files.length - testFileCount - nonSourceCount;
+    const testFileCount = effectiveFiles.filter((f) => isTestFile(f.filename)).length;
+    const nonSourceCount = effectiveFiles.filter((f) => !isTestFile(f.filename) && isNonSourceFile(f.filename)).length;
+    const sourceFileCount = effectiveFiles.length - testFileCount - nonSourceCount;
     if (sourceFileCount > 0) {
         const testRatio = testFileCount / sourceFileCount;
         const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
@@ -30076,7 +30281,15 @@ function computeRiskScore(files) {
             },
         });
     }
-    const sensitiveFiles = files.filter((f) => isSensitiveFile(f.filename));
+    const sensitiveByConfig = repoConfig?.sensitivity.high.length
+        ? effectiveFiles.filter((f) => (0, config_js_1.matchesGlobs)(f.filename, repoConfig.sensitivity.high))
+        : [];
+    const sensitiveByDefault = effectiveFiles.filter((f) => isSensitiveFile(f.filename));
+    const sensitiveFilenames = new Set([
+        ...sensitiveByConfig.map((f) => f.filename),
+        ...sensitiveByDefault.map((f) => f.filename),
+    ]);
+    const sensitiveFiles = effectiveFiles.filter((f) => sensitiveFilenames.has(f.filename));
     if (sensitiveFiles.length > 0) {
         const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
         factors.push({
@@ -30089,15 +30302,15 @@ function computeRiskScore(files) {
             },
         });
     }
-    return { score: weightedAverageScores(factors), factors };
+    return { score: weightedAverageScores(factors, customWeights), factors };
 }
-function weightedAverageScores(factors) {
+function weightedAverageScores(factors, overrides) {
     if (factors.length === 0)
         return 0;
     let totalWeight = 0;
     let weightedSum = 0;
     for (const f of factors) {
-        const w = FACTOR_WEIGHTS[f.type] ?? 1;
+        const w = overrides?.[f.type] ?? FACTOR_WEIGHTS[f.type] ?? 1;
         weightedSum += f.score * w;
         totalWeight += w;
     }
@@ -30420,7 +30633,7 @@ async function callGateApi(config, localEvaluation) {
 // ---------------------------------------------------------------------------
 async function evaluateGate(config, commitSha, prNumber) {
     const start = Date.now();
-    const [files, authorFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck] = await Promise.all([
+    const [files, authorFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig,] = await Promise.all([
         prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
         prNumber && config.githubToken
             ? computeAuthorHistory(prNumber, config.githubToken)
@@ -30431,12 +30644,18 @@ async function evaluateGate(config, commitSha, prNumber) {
         checkVercelHealth(),
         checkSupabaseHealth(),
         checkMcpHealth(),
+        (0, config_js_1.loadRepoConfig)(config.githubToken),
     ]);
-    const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files);
+    const effectiveRiskThreshold = repoConfig?.thresholds.risk ?? config.riskThreshold;
+    const effectiveWarnThreshold = repoConfig?.thresholds.warn ?? config.warnThreshold;
+    const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files, repoConfig);
     if (authorFactor) {
         riskFactors.push(authorFactor);
     }
-    const riskScore = riskFactors.length > 0 ? weightedAverageScores(riskFactors) : localRiskScore;
+    const customWeights = repoConfig?.weights ?? {};
+    const riskScore = riskFactors.length > 0
+        ? weightedAverageScores(riskFactors, customWeights)
+        : localRiskScore;
     const healthChecks = [...httpHealthChecks];
     if (vercelCheck)
         healthChecks.push(vercelCheck);
@@ -30445,7 +30664,7 @@ async function evaluateGate(config, commitSha, prNumber) {
     if (mcpCheck)
         healthChecks.push(mcpCheck);
     const healthScore = aggregateHealthScore(healthChecks);
-    const gateDecision = decideGate(riskScore, healthScore, config.riskThreshold, config.warnThreshold);
+    const gateDecision = decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
     const fileNames = files.map((f) => f.filename);
     let localEvaluation = {
         id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
@@ -30654,6 +30873,44 @@ function buildScoreBar(score, threshold) {
     const bar = "█".repeat(filled) + "░".repeat(width - filled);
     return `\`${bar}\` ${score}/100 (threshold: ${threshold})`;
 }
+function suggestSplitBoundaries(files) {
+    if (files.length < 5)
+        return [];
+    const groups = {};
+    for (const f of files) {
+        const parts = f.replace(/\\/g, "/").split("/");
+        let bucket;
+        if (parts[0] === ".github") {
+            bucket = "CI/workflow";
+        }
+        else if (/^(migrations?|supabase)/i.test(parts[0])) {
+            bucket = "database/migrations";
+        }
+        else if (parts.length >= 2) {
+            bucket = parts.slice(0, 2).join("/");
+        }
+        else {
+            bucket = parts[0];
+        }
+        (groups[bucket] ??= []).push(f);
+    }
+    const sorted = Object.entries(groups)
+        .filter(([, v]) => v.length >= 2)
+        .sort((a, b) => b[1].length - a[1].length);
+    if (sorted.length < 2)
+        return [];
+    const suggestions = [];
+    const [first, second] = sorted;
+    suggestions.push(`- **Suggested split:** \`${first[0]}/\` changes (${first[1].length} files) ` +
+        `could be a separate PR from \`${second[0]}/\` changes (${second[1].length} files).`);
+    if (sorted.length > 2) {
+        const rest = sorted.slice(2);
+        const restTotal = rest.reduce((sum, [, v]) => sum + v.length, 0);
+        suggestions.push(`- ${rest.length} other group${rest.length > 1 ? "s" : ""} (${restTotal} files) ` +
+            `may also be separable: ${rest.map(([k, v]) => `\`${k}/\` (${v.length})`).join(", ")}.`);
+    }
+    return suggestions;
+}
 function buildGuidance(evaluation) {
     if (evaluation.gateDecision === "allow")
         return [];
@@ -30680,8 +30937,16 @@ function buildGuidance(evaluation) {
         }
     }
     const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
+    const shouldSuggestSplit = (fileCountFactor && fileCountFactor.score >= 70) ||
+        (churnFactor && churnFactor.score >= 70);
     if (fileCountFactor && fileCountFactor.score >= 80) {
         lines.push(`- **Many files changed**. Large PRs are harder to review thoroughly — consider splitting.`);
+    }
+    if (shouldSuggestSplit && evaluation.files && evaluation.files.length >= 5) {
+        const splits = suggestSplitBoundaries(evaluation.files);
+        if (splits.length > 0) {
+            lines.push(...splits);
+        }
     }
     if (lines.length === 2) {
         lines.push(`- Risk score exceeds threshold. Review the risk factors above before proceeding.`);
@@ -31444,7 +31709,7 @@ async function storeEvaluation(url, evaluation) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.GateApiResponse = exports.GateEvaluation = exports.RiskFactor = exports.HealthCheckResult = exports.GateDecision = void 0;
+exports.RepoConfig = exports.GateApiResponse = exports.GateEvaluation = exports.RiskFactor = exports.HealthCheckResult = exports.GateDecision = void 0;
 const zod_1 = __nccwpck_require__(924);
 exports.GateDecision = zod_1.z.enum(["allow", "warn", "block"]);
 exports.HealthCheckResult = zod_1.z.object({
@@ -31486,6 +31751,23 @@ exports.GateApiResponse = zod_1.z.object({
     gateDecision: exports.GateDecision.optional(),
     healthChecks: zod_1.z.array(exports.HealthCheckResult).optional(),
     riskFactors: zod_1.z.array(exports.RiskFactor).optional(),
+});
+exports.RepoConfig = zod_1.z.object({
+    sensitivity: zod_1.z
+        .object({
+        high: zod_1.z.array(zod_1.z.string()).default([]),
+        medium: zod_1.z.array(zod_1.z.string()).default([]),
+        low: zod_1.z.array(zod_1.z.string()).default([]),
+    })
+        .default({}),
+    weights: zod_1.z.record(zod_1.z.number().min(0).max(10)).default({}),
+    thresholds: zod_1.z
+        .object({
+        risk: zod_1.z.number().min(0).max(100).optional(),
+        warn: zod_1.z.number().min(0).max(100).optional(),
+    })
+        .default({}),
+    ignore: zod_1.z.array(zod_1.z.string()).default([]),
 });
 
 
