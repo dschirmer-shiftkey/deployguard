@@ -31,24 +31,7 @@ function repairMockDrift(
   testFile: string,
   errorOutput: string,
 ): { diff: string; success: boolean } {
-  const moduleMatch = errorOutput.match(/Cannot find module ['"]([^'"]+)['"]/);
   const fnMatch = errorOutput.match(/TypeError: (\S+) is not a function/);
-
-  if (moduleMatch) {
-    const modulePath = moduleMatch[1];
-    return {
-      success: true,
-      diff: [
-        `--- ${testFile}`,
-        `+++ ${testFile} (suggested)`,
-        ``,
-        `Module '${modulePath}' not found. Possible fixes:`,
-        `  1. Update the import path if the module was moved/renamed`,
-        `  2. Install the missing dependency: npm install ${modulePath}`,
-        `  3. Update the mock to match the new module location`,
-      ].join("\n"),
-    };
-  }
 
   if (fnMatch) {
     const fnName = fnMatch[1];

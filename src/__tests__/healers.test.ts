@@ -45,6 +45,16 @@ describe("healer registry", () => {
     const result = await attemptRepair("src/utils.ts", "some error");
     expect(result).toBeNull();
   });
+
+  it("attemptRepair delegates to matching healer and returns result", async () => {
+    const result = await attemptRepair(
+      "src/app.test.ts",
+      'Snapshot "renders correctly" mismatched',
+    );
+    expect(result).not.toBeNull();
+    expect(result!.success).toBe(true);
+    expect(result!.testFile).toBe("src/app.test.ts");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -80,6 +90,15 @@ describe("jestHealer", () => {
     expect(result.failureType).toBe("import-resolution");
     expect(result.success).toBe(true);
     expect(result.diff).toContain("./oldPath/utils");
+  });
+
+  it("returns success:false for mock-drift without specific function pattern", async () => {
+    const result = await jestHealer.repair(
+      "src/app.test.ts",
+      "TypeError: is not a function",
+    );
+    expect(result.failureType).toBe("mock-drift");
+    expect(result.success).toBe(false);
   });
 
   it("returns success:false for unknown failures", async () => {
@@ -127,6 +146,26 @@ describe("playwrightHealer", () => {
     expect(result.diff).toContain("base URL");
   });
 
+  it("extracts specific selector from error message", async () => {
+    const result = await playwrightHealer.repair(
+      "tests/login.spec.ts",
+      "waiting for locator('#submit-btn') to be visible",
+    );
+    expect(result.failureType).toBe("selector-drift");
+    expect(result.diff).toContain("#submit-btn");
+  });
+
+  it("defaults timeout to 30000ms when specific value not parseable", async () => {
+    const result = await playwrightHealer.repair(
+      "tests/login.spec.ts",
+      "Test timeout of 5000ms exceeded",
+    );
+    expect(result.failureType).toBe("timeout");
+    expect(result.success).toBe(true);
+    expect(result.diff).toContain("30000ms");
+    expect(result.diff).toContain("60000");
+  });
+
   it("returns success:false for unknown failures", async () => {
     const result = await playwrightHealer.repair(
       "tests/login.spec.ts",
@@ -169,6 +208,43 @@ describe("cypressHealer", () => {
     );
     expect(result.failureType).toBe("timeout");
     expect(result.success).toBe(true);
+    expect(result.diff).toContain("8000");
+  });
+
+  it("handles selector drift without matching selector pattern", async () => {
+    const result = await cypressHealer.repair(
+      "cypress/e2e/home.cy.ts",
+      "Expected to find element but never found it",
+    );
+    expect(result.failureType).toBe("selector-drift");
+    expect(result.diff).toContain("(unknown selector)");
+  });
+
+  it("handles intercept drift with cy.wait('@alias') pattern", async () => {
+    const result = await cypressHealer.repair(
+      "cypress/e2e/api.cy.ts",
+      "cy.wait('@getUsers') timed out. cy.intercept needed.",
+    );
+    expect(result.failureType).toBe("intercept-drift");
+    expect(result.diff).toContain("getUsers");
+  });
+
+  it("handles intercept drift without matching alias pattern", async () => {
+    const result = await cypressHealer.repair(
+      "cypress/e2e/api.cy.ts",
+      "No request ever occurred for the intercept",
+    );
+    expect(result.failureType).toBe("intercept-drift");
+    expect(result.diff).toContain("(unknown)");
+  });
+
+  it("defaults timeout to 4000ms when specific ms not found", async () => {
+    const result = await cypressHealer.repair(
+      "cypress/e2e/home.cy.ts",
+      "CypressError: timeout exceeded",
+    );
+    expect(result.failureType).toBe("timeout");
+    expect(result.diff).toContain("4000ms");
     expect(result.diff).toContain("8000");
   });
 

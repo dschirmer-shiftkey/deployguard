@@ -22,6 +22,10 @@ inputs:
     description: "Block deployment if risk score exceeds this value (0-100)"
     required: false
     default: "70"
+  warn-threshold:
+    description: "Warn if risk score exceeds this value (0-100, defaults to risk-threshold - 15)"
+    required: false
+    default: ""
   fail-mode:
     description: "Behavior when DeployGuard is unreachable: 'open' (allow deploy) or 'closed' (block deploy)"
     required: false

@@ -2,6 +2,7 @@ export {
   evaluateGate,
   formatGateReport,
   computeRiskScore,
+  isSensitiveFile,
   checkHealth,
   checkMcpHealth,
   decideGate,

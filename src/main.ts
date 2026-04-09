@@ -76,6 +76,9 @@ async function run(): Promise<void> {
       githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
       healthCheckUrl: core.getInput("health-check-url") || undefined,
       riskThreshold: parseInt(core.getInput("risk-threshold") || "70", 10),
+      warnThreshold: core.getInput("warn-threshold")
+        ? parseInt(core.getInput("warn-threshold"), 10)
+        : undefined,
       failMode: (core.getInput("fail-mode") as "open" | "closed") || "open",
       selfHeal: core.getInput("self-heal") !== "false",
     };

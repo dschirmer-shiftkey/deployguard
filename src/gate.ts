@@ -41,6 +41,12 @@ async function fetchPrFiles(prNumber: number, token?: string): Promise<PrFileInf
       per_page: 300,
     });
 
+    if (files.length >= 300) {
+      core.warning(
+        "PR has 300+ files — risk analysis may be incomplete (GitHub API pagination limit)",
+      );
+    }
+
     return files.map((f) => ({
       filename: f.filename,
       additions: f.additions,
@@ -58,9 +64,38 @@ async function fetchPrFiles(prNumber: number, token?: string): Promise<PrFileInf
 // ---------------------------------------------------------------------------
 
 const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/;
+const NON_SOURCE_PATTERN = /\.(sql|ya?ml|json|md|css|svg|lock|txt|env|png|jpg|gif)$/i;
+const SENSITIVE_PATTERNS = [
+  /(?:^|\/)migrations\//i,
+  /(?:^|\/)auth/i,
+  /(?:^|\/)security/i,
+  /(?:^|\/)payment/i,
+  /(?:^|\/)billing/i,
+  /(?:^|\/)webhook/i,
+  /(?:^|\/)infrastructure\//i,
+  /(?:^|\/)\.github\/workflows\//i,
+  /(?:^|\/)secrets/i,
+  /(?:^|\/)\.env/i,
+];
+
+const FACTOR_WEIGHTS: Record<string, number> = {
+  code_churn: 3,
+  test_coverage: 2,
+  file_count: 2,
+  sensitive_files: 3,
+  author_history: 1,
+};
 
 function isTestFile(filename: string): boolean {
   return TEST_FILE_PATTERN.test(filename);
+}
+
+function isNonSourceFile(filename: string): boolean {
+  return NON_SOURCE_PATTERN.test(filename);
+}
+
+export function isSensitiveFile(filename: string): boolean {
+  return SENSITIVE_PATTERNS.some((p) => p.test(filename));
 }
 
 export function computeRiskScore(files: PrFileInfo[]): {
@@ -74,15 +109,18 @@ export function computeRiskScore(files: PrFileInfo[]): {
   const factors: RiskFactor[] = [];
 
   const fileCount = files.length;
-  const fileCountScore = Math.min(100, fileCount * 5);
+  const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
   factors.push({
-    type: "file_history",
+    type: "file_count",
     score: fileCountScore,
     detail: { fileCount, description: "Number of files changed" },
   });
 
   const totalChanges = files.reduce((sum, f) => sum + f.changes, 0);
-  const churnScore = Math.min(100, Math.round(totalChanges / 5));
+  const churnScore = Math.min(
+    100,
+    Math.round(25 * Math.log2(1 + totalChanges / 50)),
+  );
   factors.push({
     type: "code_churn",
     score: churnScore,
@@ -90,27 +128,52 @@ export function computeRiskScore(files: PrFileInfo[]): {
   });
 
   const testFileCount = files.filter((f) => isTestFile(f.filename)).length;
-  const sourceFileCount = files.length - testFileCount;
-  const testRatio = sourceFileCount === 0 ? 1 : testFileCount / sourceFileCount;
-  const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
-  factors.push({
-    type: "test_coverage",
-    score: testCoverageScore,
-    detail: {
-      testFiles: testFileCount,
-      sourceFiles: sourceFileCount,
-      testRatio: Math.round(testRatio * 100) / 100,
-    },
-  });
+  const nonSourceCount = files.filter(
+    (f) => !isTestFile(f.filename) && isNonSourceFile(f.filename),
+  ).length;
+  const sourceFileCount = files.length - testFileCount - nonSourceCount;
+  if (sourceFileCount > 0) {
+    const testRatio = testFileCount / sourceFileCount;
+    const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
+    factors.push({
+      type: "test_coverage",
+      score: testCoverageScore,
+      detail: {
+        testFiles: testFileCount,
+        sourceFiles: sourceFileCount,
+        nonSourceFiles: nonSourceCount,
+        testRatio: Math.round(testRatio * 100) / 100,
+      },
+    });
+  }
 
-  return { score: averageFactorScores(factors), factors };
+  const sensitiveFiles = files.filter((f) => isSensitiveFile(f.filename));
+  if (sensitiveFiles.length > 0) {
+    const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
+    factors.push({
+      type: "sensitive_files",
+      score: sensitiveScore,
+      detail: {
+        count: sensitiveFiles.length,
+        files: sensitiveFiles.map((f) => f.filename),
+        description: "High-risk files (migrations, auth, payments, CI)",
+      },
+    });
+  }
+
+  return { score: weightedAverageScores(factors), factors };
 }
 
-function averageFactorScores(factors: RiskFactor[]): number {
+function weightedAverageScores(factors: RiskFactor[]): number {
   if (factors.length === 0) return 0;
-  const avg = Math.round(
-    factors.reduce((sum, f) => sum + f.score, 0) / factors.length,
-  );
+  let totalWeight = 0;
+  let weightedSum = 0;
+  for (const f of factors) {
+    const w = FACTOR_WEIGHTS[f.type] ?? 1;
+    weightedSum += f.score * w;
+    totalWeight += w;
+  }
+  const avg = Math.round(weightedSum / totalWeight);
   return Math.min(100, Math.max(0, avg));
 }
 
@@ -133,6 +196,19 @@ async function computeAuthorHistory(
     });
     const author = pr.user?.login;
     if (!author) return null;
+
+    if (author.endsWith("[bot]")) {
+      return {
+        type: "author_history",
+        score: 20,
+        detail: {
+          author,
+          commitCount: 0,
+          dayRange: 90,
+          description: "Bot account — automated change",
+        },
+      };
+    }
 
     const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
     const { data: commits } = await octokit.rest.repos.listCommits({
@@ -290,10 +366,12 @@ function aggregateHealthScore(checks: HealthCheckResult[]): number {
 export function decideGate(
   riskScore: number,
   healthScore: number,
-  threshold: number,
+  blockThreshold: number,
+  warnThreshold?: number,
 ): GateDecision {
-  if (riskScore > threshold) return "block";
-  if (riskScore > threshold * 0.7 || healthScore < 50) return "warn";
+  const effectiveWarn = warnThreshold ?? blockThreshold - 15;
+  if (riskScore > blockThreshold) return "block";
+  if (riskScore > effectiveWarn || healthScore < 50) return "warn";
   return "allow";
 }
 
@@ -355,32 +433,39 @@ export async function evaluateGate(
 ): Promise<GateEvaluation> {
   const start = Date.now();
 
-  const files = prNumber ? await fetchPrFiles(prNumber, config.githubToken) : [];
+  const [files, authorFactor, httpHealthCheck, mcpCheck] = await Promise.all([
+    prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
+    prNumber && config.githubToken
+      ? computeAuthorHistory(prNumber, config.githubToken)
+      : Promise.resolve(null),
+    config.healthCheckUrl
+      ? checkHealth(config.healthCheckUrl)
+      : Promise.resolve(null),
+    checkMcpHealth(),
+  ]);
+
   const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files);
 
-  if (prNumber && config.githubToken) {
-    const authorFactor = await computeAuthorHistory(prNumber, config.githubToken);
-    if (authorFactor) {
-      riskFactors.push(authorFactor);
-    }
+  if (authorFactor) {
+    riskFactors.push(authorFactor);
   }
 
   const riskScore =
-    riskFactors.length > 0 ? averageFactorScores(riskFactors) : localRiskScore;
+    riskFactors.length > 0 ? weightedAverageScores(riskFactors) : localRiskScore;
 
   const healthChecks: HealthCheckResult[] = [];
-
-  if (config.healthCheckUrl) {
-    healthChecks.push(await checkHealth(config.healthCheckUrl));
-  }
-
-  const mcpCheck = await checkMcpHealth();
-  if (mcpCheck) {
-    healthChecks.push(mcpCheck);
-  }
+  if (httpHealthCheck) healthChecks.push(httpHealthCheck);
+  if (mcpCheck) healthChecks.push(mcpCheck);
 
   const healthScore = aggregateHealthScore(healthChecks);
-  const gateDecision = decideGate(riskScore, healthScore, config.riskThreshold);
+  const gateDecision = decideGate(
+    riskScore,
+    healthScore,
+    config.riskThreshold,
+    config.warnThreshold,
+  );
+
+  const fileNames = files.map((f) => f.filename);
 
   let localEvaluation: GateEvaluation = {
     id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
@@ -392,6 +477,7 @@ export async function evaluateGate(
     gateDecision,
     healthChecks,
     riskFactors,
+    files: fileNames.length > 0 ? fileNames : undefined,
     evaluationMs: Date.now() - start,
   };
 
@@ -457,12 +543,17 @@ export async function postPrComment(
 // ---------------------------------------------------------------------------
 
 export function formatGateReport(evaluation: GateEvaluation): string {
+  const healthDisplay =
+    evaluation.healthChecks.length > 0
+      ? `${evaluation.healthScore}/100`
+      : "n/a (not configured)";
+
   const lines: string[] = [
     `## DeployGuard Evaluation`,
     ``,
     `| Metric | Score |`,
     `|--------|-------|`,
-    `| Health | ${evaluation.healthScore}/100 |`,
+    `| Health | ${healthDisplay} |`,
     `| Risk   | ${evaluation.riskScore}/100 |`,
     `| **Decision** | **${evaluation.gateDecision.toUpperCase()}** |`,
     ``,
@@ -486,6 +577,21 @@ export function formatGateReport(evaluation: GateEvaluation): string {
       );
     }
     lines.push(``);
+  }
+
+  if (evaluation.files && evaluation.files.length > 0) {
+    const sensitiveSet = new Set(
+      evaluation.files.filter((f) => isSensitiveFile(f)),
+    );
+    lines.push(
+      `<details><summary>Files changed (${evaluation.files.length})</summary>`,
+      ``,
+    );
+    for (const file of evaluation.files) {
+      const marker = sensitiveSet.has(file) ? " **[!]**" : "";
+      lines.push(`- \`${file}\`${marker}`);
+    }
+    lines.push(``, `</details>`, ``);
   }
 
   if (evaluation.reportUrl) {

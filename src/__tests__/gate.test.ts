@@ -1,6 +1,47 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { computeRiskScore, decideGate, checkHealth, formatGateReport } from "../gate.js";
+import {
+  computeRiskScore,
+  isSensitiveFile,
+  decideGate,
+  checkHealth,
+  checkMcpHealth,
+  postPrComment,
+  formatGateReport,
+} from "../gate.js";
 import type { GateEvaluation } from "../types.js";
+
+const { mockListComments, mockCreateComment, mockUpdateComment } = vi.hoisted(
+  () => ({
+    mockListComments: vi.fn(),
+    mockCreateComment: vi.fn(),
+    mockUpdateComment: vi.fn(),
+  }),
+);
+
+vi.mock("@actions/core", () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  setFailed: vi.fn(),
+  setOutput: vi.fn(),
+  getInput: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@actions/github", () => ({
+  context: {
+    repo: { owner: "test-owner", repo: "test-repo" },
+  },
+  getOctokit: () => ({
+    rest: {
+      issues: {
+        listComments: mockListComments,
+        createComment: mockCreateComment,
+        updateComment: mockUpdateComment,
+      },
+    },
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // computeRiskScore
@@ -24,7 +65,9 @@ describe("computeRiskScore", () => {
       },
     ]);
     expect(result.score).toBeLessThanOrEqual(30);
-    expect(result.factors).toHaveLength(3);
+    expect(result.factors.find((f) => f.type === "file_count")).toBeDefined();
+    expect(result.factors.find((f) => f.type === "code_churn")).toBeDefined();
+    expect(result.factors.find((f) => f.type === "test_coverage")).toBeDefined();
   });
 
   it("produces a high score for a large PR with no tests", () => {
@@ -35,7 +78,7 @@ describe("computeRiskScore", () => {
       changes: 70,
     }));
     const result = computeRiskScore(files);
-    expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.score).toBeGreaterThanOrEqual(60);
   });
 
   it("caps the score at 100", () => {
@@ -49,25 +92,61 @@ describe("computeRiskScore", () => {
     expect(result.score).toBeLessThanOrEqual(100);
   });
 
-  it("recognises various test file patterns", () => {
-    const files = [
-      { filename: "src/foo.test.ts", additions: 1, deletions: 0, changes: 1 },
-      { filename: "src/bar.spec.tsx", additions: 1, deletions: 0, changes: 1 },
-      {
-        filename: "src/__tests__/baz.ts",
+  it("uses logarithmic scale for code_churn", () => {
+    const small = computeRiskScore([
+      { filename: "src/a.ts", additions: 50, deletions: 0, changes: 50 },
+    ]);
+    const medium = computeRiskScore([
+      { filename: "src/a.ts", additions: 500, deletions: 0, changes: 500 },
+    ]);
+    const large = computeRiskScore([
+      { filename: "src/a.ts", additions: 5000, deletions: 0, changes: 5000 },
+    ]);
+    const smallChurn = small.factors.find((f) => f.type === "code_churn")!;
+    const mediumChurn = medium.factors.find((f) => f.type === "code_churn")!;
+    const largeChurn = large.factors.find((f) => f.type === "code_churn")!;
+    expect(smallChurn.score).toBeLessThan(mediumChurn.score);
+    expect(mediumChurn.score).toBeLessThan(largeChurn.score);
+    expect(mediumChurn.score).toBeLessThan(100);
+  });
+
+  it("uses logarithmic scale for file_count", () => {
+    const makeFiles = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        filename: `src/f${i}.ts`,
         additions: 1,
         deletions: 0,
         changes: 1,
-      },
-      { filename: "cypress/e2e/login.cy.ts", additions: 1, deletions: 0, changes: 1 },
-    ];
-    const result = computeRiskScore(files);
-    const testCoverage = result.factors.find((f) => f.type === "test_coverage");
-    expect(testCoverage).toBeDefined();
-    expect(testCoverage!.score).toBe(0);
+      }));
+    const small = computeRiskScore(makeFiles(3));
+    const large = computeRiskScore(makeFiles(30));
+    const smallCount = small.factors.find((f) => f.type === "file_count")!;
+    const largeCount = large.factors.find((f) => f.type === "file_count")!;
+    expect(smallCount.score).toBeLessThan(largeCount.score);
+    expect(smallCount.score).toBeLessThan(100);
   });
 
-  it("gives higher test_coverage risk when tests are absent", () => {
+  it("excludes non-source files from test_coverage denominator", () => {
+    const result = computeRiskScore([
+      { filename: "README.md", additions: 10, deletions: 0, changes: 10 },
+      { filename: "schema.json", additions: 5, deletions: 0, changes: 5 },
+      { filename: "migrations/001.sql", additions: 20, deletions: 0, changes: 20 },
+    ]);
+    const testCov = result.factors.find((f) => f.type === "test_coverage");
+    expect(testCov).toBeUndefined();
+  });
+
+  it("includes test_coverage when source files are present alongside non-source", () => {
+    const result = computeRiskScore([
+      { filename: "src/app.ts", additions: 50, deletions: 0, changes: 50 },
+      { filename: "README.md", additions: 10, deletions: 0, changes: 10 },
+    ]);
+    const testCov = result.factors.find((f) => f.type === "test_coverage");
+    expect(testCov).toBeDefined();
+    expect(testCov!.score).toBe(100);
+  });
+
+  it("gives lower test_coverage risk when tests are present", () => {
     const noTests = computeRiskScore([
       { filename: "src/a.ts", additions: 10, deletions: 0, changes: 10 },
       { filename: "src/b.ts", additions: 10, deletions: 0, changes: 10 },
@@ -80,6 +159,68 @@ describe("computeRiskScore", () => {
     const withTestsCov = withTests.factors.find((f) => f.type === "test_coverage")!;
     expect(noTestsCov.score).toBeGreaterThan(withTestsCov.score);
   });
+
+  it("detects sensitive files and produces a sensitive_files factor", () => {
+    const result = computeRiskScore([
+      { filename: "supabase/migrations/001.sql", additions: 20, deletions: 0, changes: 20 },
+      { filename: "src/auth/login.ts", additions: 30, deletions: 0, changes: 30 },
+      { filename: "src/api/payment/checkout.ts", additions: 40, deletions: 0, changes: 40 },
+      { filename: "src/utils.ts", additions: 5, deletions: 0, changes: 5 },
+    ]);
+    const sensitive = result.factors.find((f) => f.type === "sensitive_files");
+    expect(sensitive).toBeDefined();
+    expect(sensitive!.score).toBe(75);
+  });
+
+  it("does not produce sensitive_files factor when none match", () => {
+    const result = computeRiskScore([
+      { filename: "src/utils.ts", additions: 10, deletions: 0, changes: 10 },
+      { filename: "src/helpers.ts", additions: 5, deletions: 0, changes: 5 },
+    ]);
+    const sensitive = result.factors.find((f) => f.type === "sensitive_files");
+    expect(sensitive).toBeUndefined();
+  });
+
+  it("weights sensitive_files heavily in the overall score", () => {
+    const result = computeRiskScore([
+      { filename: "src/auth/login.ts", additions: 5, deletions: 0, changes: 5 },
+      { filename: "src/payment/checkout.ts", additions: 5, deletions: 0, changes: 5 },
+      { filename: "src/billing/invoice.ts", additions: 5, deletions: 0, changes: 5 },
+      { filename: "src/webhook/stripe.ts", additions: 5, deletions: 0, changes: 5 },
+    ]);
+    const sensitiveF = result.factors.find((f) => f.type === "sensitive_files");
+    expect(sensitiveF).toBeDefined();
+    expect(sensitiveF!.score).toBe(100);
+    expect(result.score).toBeGreaterThanOrEqual(60);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSensitiveFile
+// ---------------------------------------------------------------------------
+
+describe("isSensitiveFile", () => {
+  it("detects migration files", () => {
+    expect(isSensitiveFile("supabase/migrations/001.sql")).toBe(true);
+  });
+
+  it("detects auth files", () => {
+    expect(isSensitiveFile("src/auth/login.ts")).toBe(true);
+  });
+
+  it("detects payment/webhook files", () => {
+    expect(isSensitiveFile("api/payment/charge.ts")).toBe(true);
+    expect(isSensitiveFile("api/webhook/stripe.ts")).toBe(true);
+  });
+
+  it("detects CI workflow files", () => {
+    expect(isSensitiveFile(".github/workflows/deploy.yml")).toBe(true);
+  });
+
+  it("returns false for normal source files", () => {
+    expect(isSensitiveFile("src/components/Button.tsx")).toBe(false);
+    expect(isSensitiveFile("src/utils/format.ts")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -91,8 +232,12 @@ describe("decideGate", () => {
     expect(decideGate(20, 100, 70)).toBe("allow");
   });
 
-  it("warns when risk approaches threshold (above 70% of threshold)", () => {
-    expect(decideGate(55, 100, 70)).toBe("warn");
+  it("warns when risk exceeds warn threshold (default: block - 15)", () => {
+    expect(decideGate(56, 100, 70)).toBe("warn");
+  });
+
+  it("allows when risk is below the default warn threshold", () => {
+    expect(decideGate(54, 100, 70)).toBe("allow");
   });
 
   it("warns when health is degraded even if risk is low", () => {
@@ -110,6 +255,11 @@ describe("decideGate", () => {
   it("does not block at exactly the threshold", () => {
     const decision = decideGate(70, 100, 70);
     expect(decision).not.toBe("block");
+  });
+
+  it("respects custom warn threshold", () => {
+    expect(decideGate(45, 100, 70, 40)).toBe("warn");
+    expect(decideGate(35, 100, 70, 40)).toBe("allow");
   });
 });
 
@@ -177,11 +327,23 @@ describe("formatGateReport", () => {
     evaluationMs: 42,
   };
 
-  it("includes health and risk scores in the table", () => {
+  it("shows n/a for health when no checks configured", () => {
     const report = formatGateReport(baseEvaluation);
-    expect(report).toContain("100/100");
+    expect(report).toContain("n/a (not configured)");
     expect(report).toContain("30/100");
     expect(report).toContain("ALLOW");
+  });
+
+  it("shows actual health score when checks are present", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      healthChecks: [
+        { target: "https://api.example.com/health", status: "allow", latencyMs: 50 },
+      ],
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("100/100");
+    expect(report).not.toContain("n/a");
   });
 
   it("lists risk factors when present", () => {
@@ -205,6 +367,27 @@ describe("formatGateReport", () => {
     expect(report).toContain("https://api.example.com/health");
     expect(report).toContain("ALLOW");
     expect(report).toContain("123ms");
+  });
+
+  it("includes collapsed file list with sensitive markers", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      files: [
+        "src/utils.ts",
+        "src/auth/login.ts",
+        "supabase/migrations/001.sql",
+      ],
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("Files changed (3)");
+    expect(report).toContain("`src/utils.ts`");
+    expect(report).toContain("`src/auth/login.ts` **[!]**");
+    expect(report).toContain("`supabase/migrations/001.sql` **[!]**");
+  });
+
+  it("omits file list when no files are present", () => {
+    const report = formatGateReport(baseEvaluation);
+    expect(report).not.toContain("Files changed");
   });
 
   it("includes report URL when provided", () => {
@@ -240,7 +423,7 @@ describe("GateDecision exhaustiveness", () => {
     const testCases = [
       { risk: 0, health: 100, threshold: 70 },
       { risk: 50, health: 100, threshold: 70 },
-      { risk: 55, health: 100, threshold: 70 },
+      { risk: 56, health: 100, threshold: 70 },
       { risk: 80, health: 100, threshold: 70 },
       { risk: 10, health: 30, threshold: 70 },
     ];
@@ -248,5 +431,129 @@ describe("GateDecision exhaustiveness", () => {
       const decision = decideGate(risk, health, threshold);
       expect(validDecisions.has(decision)).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkMcpHealth
+// ---------------------------------------------------------------------------
+
+describe("checkMcpHealth", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.MCP_GATEWAY_URL;
+    delete process.env.MCP_GATEWAY_KEY;
+  });
+
+  it("returns null when env vars are not set", async () => {
+    const result = await checkMcpHealth();
+    expect(result).toBeNull();
+  });
+
+  it("returns null when only URL is set without key", async () => {
+    process.env.MCP_GATEWAY_URL = "https://mcp.example.com";
+    const result = await checkMcpHealth();
+    expect(result).toBeNull();
+  });
+
+  it("returns allow when MCP reports healthy", async () => {
+    process.env.MCP_GATEWAY_URL = "https://mcp.example.com";
+    process.env.MCP_GATEWAY_KEY = "test-key";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ result: { healthy: true } }), {
+        status: 200,
+      }),
+    );
+    const result = await checkMcpHealth();
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("allow");
+    expect(result!.target).toContain("mcp:");
+  });
+
+  it("returns warn when MCP reports unhealthy", async () => {
+    process.env.MCP_GATEWAY_URL = "https://mcp.example.com";
+    process.env.MCP_GATEWAY_KEY = "test-key";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ result: { healthy: false } }), {
+        status: 200,
+      }),
+    );
+    const result = await checkMcpHealth();
+    expect(result!.status).toBe("warn");
+  });
+
+  it("returns warn when MCP returns non-200", async () => {
+    process.env.MCP_GATEWAY_URL = "https://mcp.example.com";
+    process.env.MCP_GATEWAY_KEY = "test-key";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("error", { status: 500 }),
+    );
+    const result = await checkMcpHealth();
+    expect(result!.status).toBe("warn");
+    expect(result!.detail).toHaveProperty("httpStatus", 500);
+  });
+
+  it("returns warn on network error (fail-open)", async () => {
+    process.env.MCP_GATEWAY_URL = "https://mcp.example.com";
+    process.env.MCP_GATEWAY_KEY = "test-key";
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const result = await checkMcpHealth();
+    expect(result!.status).toBe("warn");
+    expect(result!.detail).toHaveProperty("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// postPrComment
+// ---------------------------------------------------------------------------
+
+describe("postPrComment", () => {
+  beforeEach(() => {
+    mockListComments.mockReset();
+    mockCreateComment.mockReset().mockResolvedValue({});
+    mockUpdateComment.mockReset().mockResolvedValue({});
+  });
+
+  it("creates a new comment when no existing marker found", async () => {
+    mockListComments.mockResolvedValue({ data: [] });
+    await postPrComment("## Report", 42, "ghp_test");
+
+    expect(mockCreateComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: "test-owner",
+        repo: "test-repo",
+        issue_number: 42,
+        body: expect.stringContaining("<!-- deployguard-gate-report -->"),
+      }),
+    );
+    expect(mockUpdateComment).not.toHaveBeenCalled();
+  });
+
+  it("updates an existing comment when marker is found", async () => {
+    mockListComments.mockResolvedValue({
+      data: [
+        { id: 999, body: "<!-- deployguard-gate-report -->\nold report" },
+      ],
+    });
+    await postPrComment("## Updated Report", 42, "ghp_test");
+
+    expect(mockUpdateComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comment_id: 999,
+        body: expect.stringContaining("## Updated Report"),
+      }),
+    );
+    expect(mockCreateComment).not.toHaveBeenCalled();
+  });
+
+  it("handles API errors gracefully without throwing", async () => {
+    mockListComments.mockRejectedValue(new Error("GitHub API error"));
+    await expect(
+      postPrComment("## Report", 42, "ghp_test"),
+    ).resolves.toBeUndefined();
   });
 });
