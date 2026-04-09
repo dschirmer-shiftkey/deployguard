@@ -3,7 +3,7 @@ import * as github from "@actions/github";
 import { RepoConfig } from "./types.js";
 import type { RepoConfig as RepoConfigType } from "./types.js";
 
-let yamlParse: ((input: string) => unknown) | null = null;
+const yamlParse: ((input: string) => unknown) | null = null;
 
 function parseYaml(input: string): unknown {
   if (yamlParse) return yamlParse(input);

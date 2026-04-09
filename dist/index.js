@@ -29966,7 +29966,7 @@ exports.matchesGlobs = matchesGlobs;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const types_js_1 = __nccwpck_require__(8522);
-let yamlParse = null;
+const yamlParse = null;
 function parseYaml(input) {
     if (yamlParse)
         return yamlParse(input);

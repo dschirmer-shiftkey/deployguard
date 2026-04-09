@@ -398,7 +398,7 @@ server.tool(
         : 100;
 
     let riskScore = 0;
-    let factors: RiskFactor[] = [];
+    const factors: RiskFactor[] = [];
     if (files.length > 0) {
       const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + files.length)));
       factors.push({

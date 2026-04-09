@@ -202,7 +202,7 @@ server.tool("compute-risk-score", "Compute a deployment risk score for a set of 
         changes: z.number().int().min(0),
     }))
         .describe("Array of changed files with their line change counts"),
-}, async ({ files, }) => {
+}, async ({ files }) => {
     if (files.length === 0) {
         return {
             content: [
@@ -229,8 +229,7 @@ server.tool("compute-risk-score", "Compute a deployment risk score for a set of 
         detail: { totalChanges, weightedChanges: Math.round(weightedChanges) },
     });
     const testFiles = files.filter((f) => TEST_FILE_PATTERN.test(f.filename));
-    const nonSource = files.filter((f) => !TEST_FILE_PATTERN.test(f.filename) &&
-        NON_SOURCE_PATTERN.test(f.filename));
+    const nonSource = files.filter((f) => !TEST_FILE_PATTERN.test(f.filename) && NON_SOURCE_PATTERN.test(f.filename));
     const sourceCount = files.length - testFiles.length - nonSource.length;
     if (sourceCount > 0) {
         const ratio = testFiles.length / sourceCount;
@@ -308,11 +307,10 @@ server.tool("evaluate-deployment", "Run a full DeployGuard evaluation including 
     }));
     healthChecks.push(...httpChecks);
     const healthScore = healthChecks.length > 0
-        ? Math.round(healthChecks.reduce((sum, c) => sum +
-            (c.status === "healthy" ? 100 : c.status === "degraded" ? 50 : 0), 0) / healthChecks.length)
+        ? Math.round(healthChecks.reduce((sum, c) => sum + (c.status === "healthy" ? 100 : c.status === "degraded" ? 50 : 0), 0) / healthChecks.length)
         : 100;
     let riskScore = 0;
-    let factors = [];
+    const factors = [];
     if (files.length > 0) {
         const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + files.length)));
         factors.push({
@@ -338,11 +336,7 @@ server.tool("evaluate-deployment", "Run a full DeployGuard evaluation including 
         }
         riskScore = Math.min(100, Math.max(0, Math.round(wSum / totalW)));
     }
-    const decision = riskScore > 70
-        ? "block"
-        : riskScore > 55 || healthScore < 50
-            ? "warn"
-            : "allow";
+    const decision = riskScore > 70 ? "block" : riskScore > 55 || healthScore < 50 ? "warn" : "allow";
     return {
         content: [
             {

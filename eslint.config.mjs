@@ -29,6 +29,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/", "node_modules/", "coverage/", "scripts/"],
+    ignores: ["dist/", "node_modules/", "coverage/", "scripts/", "mcp/"],
   },
 );
