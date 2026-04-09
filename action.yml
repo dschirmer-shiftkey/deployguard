@@ -54,6 +54,10 @@ inputs:
     description: "Comma-separated decisions that trigger the webhook (e.g. warn,block)"
     required: false
     default: "warn,block"
+  evaluation-store-url:
+    description: "URL to POST evaluation results for historical trend analysis"
+    required: false
+    default: ""
 
 outputs:
   health-score:

@@ -62,6 +62,7 @@ async function main() {
     addRiskLabels: false,
     reviewersOnRisk: [],
     webhookEvents: [],
+    evaluationStoreUrl: flags["store-url"] || undefined,
   };
 
   const commitSha = flags["sha"] ?? "0000000000000000000000000000000000000000";

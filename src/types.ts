@@ -64,6 +64,7 @@ export interface DeployGuardConfig {
   reviewersOnRisk: string[];
   webhookUrl?: string;
   webhookEvents: string[];
+  evaluationStoreUrl?: string;
 }
 
 export interface TestRepairResult {

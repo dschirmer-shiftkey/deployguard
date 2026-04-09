@@ -11,6 +11,7 @@ const {
   mockRegisterHealer,
   mockAttemptRepair,
   mockSendWebhook,
+  mockStoreEvaluation,
   mockGetInput,
   mockInfo,
   mockWarning,
@@ -34,6 +35,7 @@ const {
     mockRegisterHealer: vi.fn(),
     mockAttemptRepair: vi.fn(),
     mockSendWebhook: vi.fn(),
+    mockStoreEvaluation: vi.fn(),
     mockGetInput: vi.fn(),
     mockInfo: vi.fn(),
     mockWarning: vi.fn(),
@@ -82,6 +84,7 @@ vi.mock("../gate.js", () => ({
 
 vi.mock("../notify.js", () => ({
   sendWebhook: mockSendWebhook,
+  storeEvaluation: mockStoreEvaluation,
 }));
 
 vi.mock("../healers/index.js", () => ({
@@ -131,6 +134,7 @@ describe("run (main entrypoint)", () => {
     mockManagePrLabels.mockReset().mockResolvedValue(undefined);
     mockRequestHighRiskReviewers.mockReset().mockResolvedValue(undefined);
     mockSendWebhook.mockReset().mockResolvedValue(undefined);
+    mockStoreEvaluation.mockReset().mockResolvedValue(undefined);
     mockRegisterHealer.mockReset();
     mockAttemptRepair.mockReset();
     mockGetInput.mockReset();
@@ -350,6 +354,29 @@ describe("run (main entrypoint)", () => {
     await runMain();
 
     expect(mockSendWebhook).not.toHaveBeenCalled();
+  });
+
+  it("stores evaluation when evaluation-store-url is set", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "evaluation-store-url": "https://komatik.ai/api/deployguard/store",
+    });
+    const eval_ = makeEvaluation();
+    mockEvaluateGate.mockResolvedValue(eval_);
+    await runMain();
+
+    expect(mockStoreEvaluation).toHaveBeenCalledWith(
+      "https://komatik.ai/api/deployguard/store",
+      eval_,
+    );
+  });
+
+  it("does not store evaluation when evaluation-store-url is not set", async () => {
+    setupInputs({ "api-key": "test-key" });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockStoreEvaluation).not.toHaveBeenCalled();
   });
 
   it("proceeds with warning on fail-open when evaluateGate throws", async () => {
