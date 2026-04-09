@@ -1,6 +1,14 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { evaluateGate, formatGateReport, postPrComment } from "./gate.js";
+import {
+  evaluateGate,
+  formatGateReport,
+  postPrComment,
+  createCheckRun,
+  managePrLabels,
+  requestHighRiskReviewers,
+} from "./gate.js";
+import { sendWebhook } from "./notify.js";
 import { registerHealer, attemptRepair } from "./healers/index.js";
 import { jestHealer } from "./healers/jest.js";
 import { playwrightHealer } from "./healers/playwright.js";
@@ -76,8 +84,24 @@ async function run(): Promise<void> {
       githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
       healthCheckUrl: core.getInput("health-check-url") || undefined,
       riskThreshold: parseInt(core.getInput("risk-threshold") || "70", 10),
+      warnThreshold: core.getInput("warn-threshold")
+        ? parseInt(core.getInput("warn-threshold"), 10)
+        : undefined,
       failMode: (core.getInput("fail-mode") as "open" | "closed") || "open",
       selfHeal: core.getInput("self-heal") !== "false",
+      addRiskLabels: core.getInput("add-risk-labels") !== "false",
+      reviewersOnRisk: core.getInput("reviewers-on-risk")
+        ? core
+            .getInput("reviewers-on-risk")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
+      webhookUrl: core.getInput("webhook-url") || undefined,
+      webhookEvents: (core.getInput("webhook-events") || "warn,block")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     };
 
     const context = github.context;
@@ -91,14 +115,27 @@ async function run(): Promise<void> {
     core.setOutput("health-score", evaluation.healthScore.toString());
     core.setOutput("risk-score", evaluation.riskScore.toString());
     core.setOutput("gate-decision", evaluation.gateDecision);
+    core.setOutput("evaluation-json", JSON.stringify(evaluation));
     if (evaluation.reportUrl) {
       core.setOutput("report-url", evaluation.reportUrl);
     }
 
-    const report = formatGateReport(evaluation);
+    const report = formatGateReport(evaluation, config.riskThreshold);
 
-    if (prNumber && config.githubToken) {
-      await postPrComment(report, prNumber, config.githubToken);
+    await core.summary.addRaw(report).write();
+
+    if (config.githubToken) {
+      if (prNumber) {
+        await postPrComment(report, prNumber, config.githubToken);
+      }
+      await createCheckRun(evaluation, report, config.githubToken);
+      if (prNumber && config.addRiskLabels) {
+        await managePrLabels(prNumber, evaluation.gateDecision, config.githubToken);
+      }
+    }
+
+    if (config.webhookUrl && config.webhookEvents.includes(evaluation.gateDecision)) {
+      await sendWebhook(config.webhookUrl, evaluation);
     }
 
     switch (evaluation.gateDecision) {
@@ -107,6 +144,13 @@ async function run(): Promise<void> {
         break;
       case "warn":
         core.warning(report);
+        if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
+          await requestHighRiskReviewers(
+            prNumber,
+            config.reviewersOnRisk,
+            config.githubToken,
+          );
+        }
         if (config.selfHeal && prNumber) {
           const repairs = await runSelfHeal(config, prNumber);
           if (repairs.length > 0) {
@@ -118,6 +162,13 @@ async function run(): Promise<void> {
         }
         break;
       case "block":
+        if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
+          await requestHighRiskReviewers(
+            prNumber,
+            config.reviewersOnRisk,
+            config.githubToken,
+          );
+        }
         if (config.selfHeal && prNumber) {
           const repairs = await runSelfHeal(config, prNumber);
           const successes = repairs.filter((r) => r.success);

@@ -40,6 +40,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Resolve PR head SHA
+        id: pr
+        env:
+          GITHUB_TOKEN: ${{ inputs.use-komatik-pat == 'true' && secrets.KOMATIK_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          SHA=$(gh api "repos/${{ inputs.target-repo }}/pulls/${{ inputs.pr-number }}" --jq '.head.sha' 2>/dev/null || echo "")
+          echo "sha=${SHA:-0000000000000000000000000000000000000000}" >> "$GITHUB_OUTPUT"
+
       - name: Run gate evaluation
         id: gate
         env:
@@ -50,6 +58,7 @@ jobs:
             --repo "${{ inputs.target-repo }}" \
             --pr "${{ inputs.pr-number }}" \
             --threshold "${{ inputs.risk-threshold }}" \
+            --sha "${{ steps.pr.outputs.sha }}" \
             ${{ inputs.health-check-url && format('--health-url {0}', inputs.health-check-url) || '' }} \
             2>&1)
           EXIT_CODE=$?

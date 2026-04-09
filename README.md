@@ -37,15 +37,54 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write # required for gate report PR comments
+      checks: write # required for GitHub Check Run
+      pull-requests: write # required for PR comments, labels, and reviewer requests
     steps:
       - uses: dschirmer-shiftkey/deployguard@v1
+        id: gate
         with:
           api-key: ${{ secrets.DEPLOYGUARD_API_KEY }}
-          github-token: ${{ github.token }} # default — reads PR files
+          github-token: ${{ github.token }}
           health-check-url: https://api.example.com/health
-          risk-threshold: 70 # block if risk score > 70
+          risk-threshold: 70
+          warn-threshold: 55
+          reviewers-on-risk: "alice,bob"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
+
+### Inputs
+
+| Input               | Required | Default               | Description                                                     |
+| ------------------- | -------- | --------------------- | --------------------------------------------------------------- |
+| `api-key`           | Yes      | —                     | DeployGuard API key from komatik.xyz dashboard                  |
+| `github-token`      | No       | `${{ github.token }}` | GitHub token for PR analysis                                    |
+| `health-check-url`  | No       | —                     | Production health check URL                                     |
+| `risk-threshold`    | No       | `70`                  | Block deployment if risk score exceeds this                     |
+| `warn-threshold`    | No       | `risk-threshold - 15` | Warn if risk score exceeds this                                 |
+| `fail-mode`         | No       | `open`                | Behavior when unreachable: `open` or `closed`                   |
+| `self-heal`         | No       | `true`                | Attempt auto-repair of failing tests                            |
+| `add-risk-labels`   | No       | `true`                | Auto-apply `deployguard:low/medium/high-risk` labels to PRs     |
+| `reviewers-on-risk` | No       | —                     | Comma-separated usernames to request as reviewers on warn/block |
+| `webhook-url`       | No       | —                     | URL to POST evaluation results (Slack, Discord, etc.)           |
+| `webhook-events`    | No       | `warn,block`          | Decisions that trigger the webhook                              |
+
+### Outputs
+
+| Output            | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `health-score`    | Infrastructure health score (0–100)               |
+| `risk-score`      | Code risk score (0–100)                           |
+| `gate-decision`   | `allow`, `warn`, or `block`                       |
+| `report-url`      | URL to full report on DeployGuard dashboard       |
+| `evaluation-json` | Full gate evaluation as JSON for downstream steps |
+
+### Permissions
+
+| Permission             | Required for                                |
+| ---------------------- | ------------------------------------------- |
+| `checks: write`        | GitHub Check Run (appears in PR Checks tab) |
+| `pull-requests: write` | PR comments, risk labels, reviewer requests |
+| `contents: read`       | Reading PR file metadata                    |
 
 ---
 

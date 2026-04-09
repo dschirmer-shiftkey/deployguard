@@ -58,6 +58,9 @@ function makeConfig(overrides: Partial<DeployGuardConfig> = {}): DeployGuardConf
     riskThreshold: 70,
     failMode: "open",
     selfHeal: false,
+    addRiskLabels: true,
+    reviewersOnRisk: [],
+    webhookEvents: ["warn", "block"],
     ...overrides,
   };
 }
@@ -86,6 +89,29 @@ describe("evaluateGate (integration)", () => {
     expect(result.healthChecks).toHaveLength(0);
     expect(result.riskFactors.length).toBeGreaterThan(0);
     expect(result.evaluationMs).toBeGreaterThanOrEqual(0);
+    expect(result.files).toEqual([
+      "src/app.ts",
+      "src/utils.ts",
+      "src/__tests__/app.test.ts",
+    ]);
+  });
+
+  it("includes author_history factor when token and PR are provided", async () => {
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+    const authorFactor = result.riskFactors.find((f) => f.type === "author_history");
+    expect(authorFactor).toBeDefined();
+    expect(authorFactor!.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it("respects custom warn threshold", async () => {
+    const config = makeConfig({
+      githubToken: "ghp_test",
+      riskThreshold: 99,
+      warnThreshold: 10,
+    });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+    expect(result.gateDecision).toBe("warn");
   });
 
   it("performs health check when URL is provided", async () => {
@@ -156,5 +182,51 @@ describe("evaluateGate (integration)", () => {
     expect(result.healthScore).toBe(50);
     expect(result.healthChecks[0].status).toBe("warn");
     expect(result.gateDecision).not.toBe("block");
+  });
+
+  it("enriches evaluation when gate API returns valid data", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "api-enriched-id",
+          reportUrl: "https://komatik.xyz/reports/123",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+
+    expect(result.id).toBe("api-enriched-id");
+    expect(result.reportUrl).toBe("https://komatik.xyz/reports/123");
+  });
+
+  it("falls back to local evaluation when gate API returns non-200", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("server error", { status: 500 }));
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+
+    expect(result.id).toMatch(/^dg-abc1234-/);
+    expect(result.reportUrl).toBeUndefined();
+  });
+
+  it("falls back to local evaluation when gate API returns invalid schema", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ riskScore: "not-a-number" }), {
+        status: 200,
+      }),
+    );
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+
+    expect(result.id).toMatch(/^dg-abc1234-/);
+  });
+
+  it("falls back to local evaluation when gate API is unreachable", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+
+    expect(result.id).toMatch(/^dg-abc1234-/);
   });
 });

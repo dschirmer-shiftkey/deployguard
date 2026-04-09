@@ -29961,12 +29961,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isSensitiveFile = isSensitiveFile;
 exports.computeRiskScore = computeRiskScore;
 exports.checkHealth = checkHealth;
 exports.checkMcpHealth = checkMcpHealth;
 exports.decideGate = decideGate;
 exports.evaluateGate = evaluateGate;
 exports.postPrComment = postPrComment;
+exports.createCheckRun = createCheckRun;
+exports.managePrLabels = managePrLabels;
+exports.requestHighRiskReviewers = requestHighRiskReviewers;
 exports.formatGateReport = formatGateReport;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
@@ -29977,27 +29981,62 @@ const types_js_1 = __nccwpck_require__(8522);
 async function fetchPrFiles(prNumber, token) {
     if (!token)
         return [];
-    const octokit = github.getOctokit(token);
-    const { owner, repo } = github.context.repo;
-    const { data: files } = await octokit.rest.pulls.listFiles({
-        owner,
-        repo,
-        pull_number: prNumber,
-        per_page: 300,
-    });
-    return files.map((f) => ({
-        filename: f.filename,
-        additions: f.additions,
-        deletions: f.deletions,
-        changes: f.changes,
-    }));
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const { data: files } = await octokit.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: prNumber,
+            per_page: 300,
+        });
+        if (files.length >= 300) {
+            core.warning("PR has 300+ files — risk analysis may be incomplete (GitHub API pagination limit)");
+        }
+        return files.map((f) => ({
+            filename: f.filename,
+            additions: f.additions,
+            deletions: f.deletions,
+            changes: f.changes,
+        }));
+    }
+    catch (error) {
+        core.debug(`Failed to fetch PR files: ${error}`);
+        return [];
+    }
 }
 // ---------------------------------------------------------------------------
 // Risk scoring heuristics
 // ---------------------------------------------------------------------------
 const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/;
+const NON_SOURCE_PATTERN = /\.(sql|ya?ml|json|md|css|svg|lock|txt|env|png|jpg|gif)$/i;
+const SENSITIVE_PATTERNS = [
+    /(?:^|\/)migrations\//i,
+    /(?:^|\/)auth/i,
+    /(?:^|\/)security/i,
+    /(?:^|\/)payment/i,
+    /(?:^|\/)billing/i,
+    /(?:^|\/)webhook/i,
+    /(?:^|\/)infrastructure\//i,
+    /(?:^|\/)\.github\/workflows\//i,
+    /(?:^|\/)secrets/i,
+    /(?:^|\/)\.env/i,
+];
+const FACTOR_WEIGHTS = {
+    code_churn: 3,
+    test_coverage: 2,
+    file_count: 2,
+    sensitive_files: 3,
+    author_history: 1,
+};
 function isTestFile(filename) {
     return TEST_FILE_PATTERN.test(filename);
+}
+function isNonSourceFile(filename) {
+    return NON_SOURCE_PATTERN.test(filename);
+}
+function isSensitiveFile(filename) {
+    return SENSITIVE_PATTERNS.some((p) => p.test(filename));
 }
 function computeRiskScore(files) {
     if (files.length === 0) {
@@ -30005,38 +30044,62 @@ function computeRiskScore(files) {
     }
     const factors = [];
     const fileCount = files.length;
-    const fileCountScore = Math.min(100, fileCount * 5);
+    const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
     factors.push({
-        type: "file_history",
+        type: "file_count",
         score: fileCountScore,
         detail: { fileCount, description: "Number of files changed" },
     });
     const totalChanges = files.reduce((sum, f) => sum + f.changes, 0);
-    const churnScore = Math.min(100, Math.round(totalChanges / 5));
+    const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + totalChanges / 50)));
     factors.push({
         type: "code_churn",
         score: churnScore,
         detail: { totalChanges, description: "Total lines changed" },
     });
     const testFileCount = files.filter((f) => isTestFile(f.filename)).length;
-    const sourceFileCount = files.length - testFileCount;
-    const testRatio = sourceFileCount === 0 ? 1 : testFileCount / sourceFileCount;
-    const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
-    factors.push({
-        type: "test_coverage",
-        score: testCoverageScore,
-        detail: {
-            testFiles: testFileCount,
-            sourceFiles: sourceFileCount,
-            testRatio: Math.round(testRatio * 100) / 100,
-        },
-    });
-    return { score: averageFactorScores(factors), factors };
+    const nonSourceCount = files.filter((f) => !isTestFile(f.filename) && isNonSourceFile(f.filename)).length;
+    const sourceFileCount = files.length - testFileCount - nonSourceCount;
+    if (sourceFileCount > 0) {
+        const testRatio = testFileCount / sourceFileCount;
+        const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
+        factors.push({
+            type: "test_coverage",
+            score: testCoverageScore,
+            detail: {
+                testFiles: testFileCount,
+                sourceFiles: sourceFileCount,
+                nonSourceFiles: nonSourceCount,
+                testRatio: Math.round(testRatio * 100) / 100,
+            },
+        });
+    }
+    const sensitiveFiles = files.filter((f) => isSensitiveFile(f.filename));
+    if (sensitiveFiles.length > 0) {
+        const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
+        factors.push({
+            type: "sensitive_files",
+            score: sensitiveScore,
+            detail: {
+                count: sensitiveFiles.length,
+                files: sensitiveFiles.map((f) => f.filename),
+                description: "High-risk files (migrations, auth, payments, CI)",
+            },
+        });
+    }
+    return { score: weightedAverageScores(factors), factors };
 }
-function averageFactorScores(factors) {
+function weightedAverageScores(factors) {
     if (factors.length === 0)
         return 0;
-    const avg = Math.round(factors.reduce((sum, f) => sum + f.score, 0) / factors.length);
+    let totalWeight = 0;
+    let weightedSum = 0;
+    for (const f of factors) {
+        const w = FACTOR_WEIGHTS[f.type] ?? 1;
+        weightedSum += f.score * w;
+        totalWeight += w;
+    }
+    const avg = Math.round(weightedSum / totalWeight);
     return Math.min(100, Math.max(0, avg));
 }
 // ---------------------------------------------------------------------------
@@ -30054,6 +30117,18 @@ async function computeAuthorHistory(prNumber, token) {
         const author = pr.user?.login;
         if (!author)
             return null;
+        if (author.endsWith("[bot]")) {
+            return {
+                type: "author_history",
+                score: 20,
+                detail: {
+                    author,
+                    commitCount: 0,
+                    dayRange: 90,
+                    description: "Bot account — automated change",
+                },
+            };
+        }
         const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
         const { data: commits } = await octokit.rest.repos.listCommits({
             owner,
@@ -30193,10 +30268,11 @@ function aggregateHealthScore(checks) {
 // ---------------------------------------------------------------------------
 // Gate decision logic
 // ---------------------------------------------------------------------------
-function decideGate(riskScore, healthScore, threshold) {
-    if (riskScore > threshold)
+function decideGate(riskScore, healthScore, blockThreshold, warnThreshold) {
+    const effectiveWarn = warnThreshold ?? blockThreshold - 15;
+    if (riskScore > blockThreshold)
         return "block";
-    if (riskScore > threshold * 0.7 || healthScore < 50)
+    if (riskScore > effectiveWarn || healthScore < 50)
         return "warn";
     return "allow";
 }
@@ -30243,25 +30319,27 @@ async function callGateApi(config, localEvaluation) {
 // ---------------------------------------------------------------------------
 async function evaluateGate(config, commitSha, prNumber) {
     const start = Date.now();
-    const files = prNumber ? await fetchPrFiles(prNumber, config.githubToken) : [];
+    const [files, authorFactor, httpHealthCheck, mcpCheck] = await Promise.all([
+        prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
+        prNumber && config.githubToken
+            ? computeAuthorHistory(prNumber, config.githubToken)
+            : Promise.resolve(null),
+        config.healthCheckUrl ? checkHealth(config.healthCheckUrl) : Promise.resolve(null),
+        checkMcpHealth(),
+    ]);
     const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files);
-    if (prNumber && config.githubToken) {
-        const authorFactor = await computeAuthorHistory(prNumber, config.githubToken);
-        if (authorFactor) {
-            riskFactors.push(authorFactor);
-        }
+    if (authorFactor) {
+        riskFactors.push(authorFactor);
     }
-    const riskScore = riskFactors.length > 0 ? averageFactorScores(riskFactors) : localRiskScore;
+    const riskScore = riskFactors.length > 0 ? weightedAverageScores(riskFactors) : localRiskScore;
     const healthChecks = [];
-    if (config.healthCheckUrl) {
-        healthChecks.push(await checkHealth(config.healthCheckUrl));
-    }
-    const mcpCheck = await checkMcpHealth();
-    if (mcpCheck) {
+    if (httpHealthCheck)
+        healthChecks.push(httpHealthCheck);
+    if (mcpCheck)
         healthChecks.push(mcpCheck);
-    }
     const healthScore = aggregateHealthScore(healthChecks);
-    const gateDecision = decideGate(riskScore, healthScore, config.riskThreshold);
+    const gateDecision = decideGate(riskScore, healthScore, config.riskThreshold, config.warnThreshold);
+    const fileNames = files.map((f) => f.filename);
     let localEvaluation = {
         id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
         repoId: `${github.context.repo.owner}/${github.context.repo.repo}`,
@@ -30272,6 +30350,7 @@ async function evaluateGate(config, commitSha, prNumber) {
         gateDecision,
         healthChecks,
         riskFactors,
+        files: fileNames.length > 0 ? fileNames : undefined,
         evaluationMs: Date.now() - start,
     };
     const apiResponse = await callGateApi(config, localEvaluation);
@@ -30323,19 +30402,203 @@ async function postPrComment(report, prNumber, token) {
     }
 }
 // ---------------------------------------------------------------------------
+// GitHub Check Run
+// ---------------------------------------------------------------------------
+const CONCLUSION_MAP = {
+    allow: "success",
+    warn: "neutral",
+    block: "failure",
+};
+async function createCheckRun(evaluation, report, token) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        await octokit.rest.checks.create({
+            owner,
+            repo,
+            name: "DeployGuard",
+            head_sha: evaluation.commitSha,
+            status: "completed",
+            conclusion: CONCLUSION_MAP[evaluation.gateDecision],
+            output: {
+                title: `DeployGuard: ${evaluation.gateDecision.toUpperCase()}`,
+                summary: report,
+            },
+        });
+    }
+    catch (error) {
+        core.debug(`Failed to create check run: ${error}`);
+    }
+}
+// ---------------------------------------------------------------------------
+// PR risk labels
+// ---------------------------------------------------------------------------
+const RISK_LABELS = {
+    "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
+    "deployguard:medium-risk": {
+        color: "fbca04",
+        description: "DeployGuard: medium risk score",
+    },
+    "deployguard:high-risk": {
+        color: "d93f0b",
+        description: "DeployGuard: high risk score",
+    },
+};
+function riskLabelForDecision(decision) {
+    switch (decision) {
+        case "allow":
+            return "deployguard:low-risk";
+        case "warn":
+            return "deployguard:medium-risk";
+        case "block":
+            return "deployguard:high-risk";
+        default: {
+            const _exhaustive = decision;
+            throw new Error(`Unknown decision: ${_exhaustive}`);
+        }
+    }
+}
+async function managePrLabels(prNumber, decision, token) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const targetLabel = riskLabelForDecision(decision);
+        for (const labelName of Object.keys(RISK_LABELS)) {
+            const meta = RISK_LABELS[labelName];
+            try {
+                await octokit.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name: labelName,
+                    color: meta.color,
+                    description: meta.description,
+                });
+            }
+            catch {
+                // 422 = already exists — expected
+            }
+        }
+        const { data: currentLabels } = await octokit.rest.issues.listLabelsOnIssue({
+            owner,
+            repo,
+            issue_number: prNumber,
+        });
+        for (const label of currentLabels) {
+            if (label.name.startsWith("deployguard:") &&
+                label.name.endsWith("-risk") &&
+                label.name !== targetLabel) {
+                await octokit.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    name: label.name,
+                });
+            }
+        }
+        const alreadyApplied = currentLabels.some((l) => l.name === targetLabel);
+        if (!alreadyApplied) {
+            await octokit.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: prNumber,
+                labels: [targetLabel],
+            });
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to manage PR labels: ${error}`);
+    }
+}
+// ---------------------------------------------------------------------------
+// Auto-request reviewers on high risk
+// ---------------------------------------------------------------------------
+async function requestHighRiskReviewers(prNumber, reviewers, token) {
+    if (reviewers.length === 0)
+        return;
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const { data: pr } = await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+        });
+        const author = pr.user?.login;
+        const filtered = reviewers.filter((r) => r !== author);
+        if (filtered.length === 0)
+            return;
+        await octokit.rest.pulls.requestReviewers({
+            owner,
+            repo,
+            pull_number: prNumber,
+            reviewers: filtered,
+        });
+    }
+    catch (error) {
+        core.debug(`Failed to request reviewers: ${error}`);
+    }
+}
+// ---------------------------------------------------------------------------
 // Report formatting
 // ---------------------------------------------------------------------------
-function formatGateReport(evaluation) {
+function buildScoreBar(score, threshold) {
+    const width = 20;
+    const filled = Math.round((score / 100) * width);
+    const bar = "█".repeat(filled) + "░".repeat(width - filled);
+    return `\`${bar}\` ${score}/100 (threshold: ${threshold})`;
+}
+function buildGuidance(evaluation) {
+    if (evaluation.gateDecision === "allow")
+        return [];
+    const lines = [`### Guidance`, ``];
+    const factorTypes = new Set(evaluation.riskFactors.map((f) => f.type));
+    if (factorTypes.has("sensitive_files")) {
+        lines.push(`- This PR modifies **high-risk files** (auth, migrations, payments, CI). ` +
+            `Consider splitting into smaller PRs or adding targeted reviewers.`);
+    }
+    const churnFactor = evaluation.riskFactors.find((f) => f.type === "code_churn");
+    if (churnFactor && churnFactor.score >= 70) {
+        lines.push(`- **Large changeset** detected (churn score ${churnFactor.score}/100). ` +
+            `Consider breaking this into smaller, reviewable increments.`);
+    }
+    const testFactor = evaluation.riskFactors.find((f) => f.type === "test_coverage");
+    if (testFactor && testFactor.score >= 80) {
+        const detail = testFactor.detail;
+        const testFiles = detail?.["testFiles"] ?? 0;
+        if (testFiles === 0) {
+            lines.push(`- **No test files** included in this PR. Adding test coverage reduces deployment risk.`);
+        }
+        else {
+            lines.push(`- **Low test-to-source ratio**. Consider adding more tests for the changed source files.`);
+        }
+    }
+    const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
+    if (fileCountFactor && fileCountFactor.score >= 80) {
+        lines.push(`- **Many files changed**. Large PRs are harder to review thoroughly — consider splitting.`);
+    }
+    if (lines.length === 2) {
+        lines.push(`- Risk score exceeds threshold. Review the risk factors above before proceeding.`);
+    }
+    lines.push(``);
+    return lines;
+}
+function formatGateReport(evaluation, riskThreshold) {
+    const healthDisplay = evaluation.healthChecks.length > 0
+        ? `${evaluation.healthScore}/100`
+        : "n/a (not configured)";
     const lines = [
         `## DeployGuard Evaluation`,
         ``,
         `| Metric | Score |`,
         `|--------|-------|`,
-        `| Health | ${evaluation.healthScore}/100 |`,
+        `| Health | ${healthDisplay} |`,
         `| Risk   | ${evaluation.riskScore}/100 |`,
         `| **Decision** | **${evaluation.gateDecision.toUpperCase()}** |`,
         ``,
     ];
+    if (riskThreshold !== undefined) {
+        lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
+    }
     if (evaluation.riskFactors.length > 0) {
         lines.push(`### Risk Factors`, ``);
         for (const factor of evaluation.riskFactors) {
@@ -30345,12 +30608,25 @@ function formatGateReport(evaluation) {
         }
         lines.push(``);
     }
+    const guidance = buildGuidance(evaluation);
+    if (guidance.length > 0) {
+        lines.push(...guidance);
+    }
     if (evaluation.healthChecks.length > 0) {
         lines.push(`### Health Checks`, ``);
         for (const check of evaluation.healthChecks) {
             lines.push(`- \`${check.target}\` — ${check.status.toUpperCase()} (${check.latencyMs}ms)`);
         }
         lines.push(``);
+    }
+    if (evaluation.files && evaluation.files.length > 0) {
+        const sensitiveSet = new Set(evaluation.files.filter((f) => isSensitiveFile(f)));
+        lines.push(`<details><summary>Files changed (${evaluation.files.length})</summary>`, ``);
+        for (const file of evaluation.files) {
+            const marker = sensitiveSet.has(file) ? " **[!]**" : "";
+            lines.push(`- \`${file}\`${marker}`);
+        }
+        lines.push(``, `</details>`, ``);
     }
     if (evaluation.reportUrl) {
         lines.push(`[View full report](${evaluation.reportUrl})`);
@@ -30537,23 +30813,7 @@ function repairSnapshot(testFile) {
     };
 }
 function repairMockDrift(testFile, errorOutput) {
-    const moduleMatch = errorOutput.match(/Cannot find module ['"]([^'"]+)['"]/);
     const fnMatch = errorOutput.match(/TypeError: (\S+) is not a function/);
-    if (moduleMatch) {
-        const modulePath = moduleMatch[1];
-        return {
-            success: true,
-            diff: [
-                `--- ${testFile}`,
-                `+++ ${testFile} (suggested)`,
-                ``,
-                `Module '${modulePath}' not found. Possible fixes:`,
-                `  1. Update the import path if the module was moved/renamed`,
-                `  2. Install the missing dependency: npm install ${modulePath}`,
-                `  3. Update the mock to match the new module location`,
-            ].join("\n"),
-        };
-    }
     if (fnMatch) {
         const fnName = fnMatch[1];
         return {
@@ -30774,6 +31034,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const gate_js_1 = __nccwpck_require__(1956);
+const notify_js_1 = __nccwpck_require__(1622);
 const index_js_1 = __nccwpck_require__(9114);
 const jest_js_1 = __nccwpck_require__(526);
 const playwright_js_1 = __nccwpck_require__(183);
@@ -30840,8 +31101,24 @@ async function run() {
             githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
             healthCheckUrl: core.getInput("health-check-url") || undefined,
             riskThreshold: parseInt(core.getInput("risk-threshold") || "70", 10),
+            warnThreshold: core.getInput("warn-threshold")
+                ? parseInt(core.getInput("warn-threshold"), 10)
+                : undefined,
             failMode: core.getInput("fail-mode") || "open",
             selfHeal: core.getInput("self-heal") !== "false",
+            addRiskLabels: core.getInput("add-risk-labels") !== "false",
+            reviewersOnRisk: core.getInput("reviewers-on-risk")
+                ? core
+                    .getInput("reviewers-on-risk")
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : [],
+            webhookUrl: core.getInput("webhook-url") || undefined,
+            webhookEvents: (core.getInput("webhook-events") || "warn,block")
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
         };
         const context = github.context;
         const commitSha = context.sha;
@@ -30851,12 +31128,23 @@ async function run() {
         core.setOutput("health-score", evaluation.healthScore.toString());
         core.setOutput("risk-score", evaluation.riskScore.toString());
         core.setOutput("gate-decision", evaluation.gateDecision);
+        core.setOutput("evaluation-json", JSON.stringify(evaluation));
         if (evaluation.reportUrl) {
             core.setOutput("report-url", evaluation.reportUrl);
         }
-        const report = (0, gate_js_1.formatGateReport)(evaluation);
-        if (prNumber && config.githubToken) {
-            await (0, gate_js_1.postPrComment)(report, prNumber, config.githubToken);
+        const report = (0, gate_js_1.formatGateReport)(evaluation, config.riskThreshold);
+        await core.summary.addRaw(report).write();
+        if (config.githubToken) {
+            if (prNumber) {
+                await (0, gate_js_1.postPrComment)(report, prNumber, config.githubToken);
+            }
+            await (0, gate_js_1.createCheckRun)(evaluation, report, config.githubToken);
+            if (prNumber && config.addRiskLabels) {
+                await (0, gate_js_1.managePrLabels)(prNumber, evaluation.gateDecision, config.githubToken);
+            }
+        }
+        if (config.webhookUrl && config.webhookEvents.includes(evaluation.gateDecision)) {
+            await (0, notify_js_1.sendWebhook)(config.webhookUrl, evaluation);
         }
         switch (evaluation.gateDecision) {
             case "allow":
@@ -30864,6 +31152,9 @@ async function run() {
                 break;
             case "warn":
                 core.warning(report);
+                if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
+                    await (0, gate_js_1.requestHighRiskReviewers)(prNumber, config.reviewersOnRisk, config.githubToken);
+                }
                 if (config.selfHeal && prNumber) {
                     const repairs = await runSelfHeal(config, prNumber);
                     if (repairs.length > 0) {
@@ -30873,6 +31164,9 @@ async function run() {
                 }
                 break;
             case "block":
+                if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
+                    await (0, gate_js_1.requestHighRiskReviewers)(prNumber, config.reviewersOnRisk, config.githubToken);
+                }
                 if (config.selfHeal && prNumber) {
                     const repairs = await runSelfHeal(config, prNumber);
                     const successes = repairs.filter((r) => r.success);
@@ -30905,6 +31199,99 @@ run();
 
 /***/ }),
 
+/***/ 1622:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.sendWebhook = sendWebhook;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+const WEBHOOK_TIMEOUT_MS = 10_000;
+async function sendWebhook(url, evaluation) {
+    const { owner, repo } = github.context.repo;
+    const prUrl = evaluation.prNumber
+        ? `https://github.com/${owner}/${repo}/pull/${evaluation.prNumber}`
+        : undefined;
+    const decisionEmoji = {
+        allow: "✅",
+        warn: "⚠️",
+        block: "🚫",
+    };
+    const emoji = decisionEmoji[evaluation.gateDecision] ?? "";
+    const slackText = `${emoji} DeployGuard *${evaluation.gateDecision.toUpperCase()}* — ` +
+        `risk ${evaluation.riskScore}/100` +
+        (prUrl
+            ? ` | <${prUrl}|PR #${evaluation.prNumber}>`
+            : ` | ${evaluation.commitSha.substring(0, 7)}`) +
+        ` on \`${evaluation.repoId}\``;
+    const payload = {
+        text: slackText,
+        decision: evaluation.gateDecision,
+        riskScore: evaluation.riskScore,
+        healthScore: evaluation.healthScore,
+        repoId: evaluation.repoId,
+        prNumber: evaluation.prNumber,
+        prUrl,
+        commitSha: evaluation.commitSha,
+        riskFactors: evaluation.riskFactors,
+        healthChecks: evaluation.healthChecks,
+        reportUrl: evaluation.reportUrl,
+        timestamp: new Date().toISOString(),
+    };
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+            core.debug(`Webhook returned ${response.status} — notification may not have been delivered`);
+        }
+    }
+    catch (error) {
+        core.debug(`Webhook delivery failed: ${error}`);
+    }
+}
+
+
+/***/ }),
+
 /***/ 8522:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -30921,7 +31308,13 @@ exports.HealthCheckResult = zod_1.z.object({
     detail: zod_1.z.record(zod_1.z.unknown()).optional(),
 });
 exports.RiskFactor = zod_1.z.object({
-    type: zod_1.z.enum(["code_churn", "test_coverage", "file_history", "author_history"]),
+    type: zod_1.z.enum([
+        "code_churn",
+        "test_coverage",
+        "file_count",
+        "sensitive_files",
+        "author_history",
+    ]),
     score: zod_1.z.number().min(0).max(100),
     detail: zod_1.z.record(zod_1.z.unknown()).optional(),
 });
@@ -30935,6 +31328,7 @@ exports.GateEvaluation = zod_1.z.object({
     gateDecision: exports.GateDecision,
     healthChecks: zod_1.z.array(exports.HealthCheckResult),
     riskFactors: zod_1.z.array(exports.RiskFactor),
+    files: zod_1.z.array(zod_1.z.string()).optional(),
     evaluationMs: zod_1.z.number(),
     reportUrl: zod_1.z.string().url().optional(),
 });

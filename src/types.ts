@@ -12,7 +12,13 @@ export const HealthCheckResult = z.object({
 export type HealthCheckResult = z.infer<typeof HealthCheckResult>;
 
 export const RiskFactor = z.object({
-  type: z.enum(["code_churn", "test_coverage", "file_history", "author_history"]),
+  type: z.enum([
+    "code_churn",
+    "test_coverage",
+    "file_count",
+    "sensitive_files",
+    "author_history",
+  ]),
   score: z.number().min(0).max(100),
   detail: z.record(z.unknown()).optional(),
 });
@@ -28,6 +34,7 @@ export const GateEvaluation = z.object({
   gateDecision: GateDecision,
   healthChecks: z.array(HealthCheckResult),
   riskFactors: z.array(RiskFactor),
+  files: z.array(z.string()).optional(),
   evaluationMs: z.number(),
   reportUrl: z.string().url().optional(),
 });
@@ -50,8 +57,13 @@ export interface DeployGuardConfig {
   githubToken?: string;
   healthCheckUrl?: string;
   riskThreshold: number;
+  warnThreshold?: number;
   failMode: "open" | "closed";
   selfHeal: boolean;
+  addRiskLabels: boolean;
+  reviewersOnRisk: string[];
+  webhookUrl?: string;
+  webhookEvents: string[];
 }
 
 export interface TestRepairResult {
