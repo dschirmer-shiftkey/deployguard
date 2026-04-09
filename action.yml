@@ -1,0 +1,42 @@
+name: "DeployGuard"
+description: "Self-healing CI/CD deployment gate — queries production health, scores risk, blocks dangerous releases"
+author: "Komatik"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  api-key:
+    description: "DeployGuard API key (from komatik.xyz dashboard)"
+    required: true
+  health-check-url:
+    description: "Primary health check URL for your production service"
+    required: false
+    default: ""
+  risk-threshold:
+    description: "Block deployment if risk score exceeds this value (0-100)"
+    required: false
+    default: "70"
+  fail-mode:
+    description: "Behavior when DeployGuard is unreachable: 'open' (allow deploy) or 'closed' (block deploy)"
+    required: false
+    default: "open"
+  self-heal:
+    description: "Attempt to auto-repair failing tests before blocking"
+    required: false
+    default: "true"
+
+outputs:
+  health-score:
+    description: "Infrastructure health score (0-100)"
+  risk-score:
+    description: "Code risk score (0-100)"
+  gate-decision:
+    description: "Gate decision: allow, warn, or block"
+  report-url:
+    description: "URL to the full evaluation report on the DeployGuard dashboard"
+
+runs:
+  using: "node20"
+  main: "dist/main.js"

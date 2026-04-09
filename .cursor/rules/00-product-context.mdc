@@ -1,0 +1,30 @@
+---
+description: DeployGuard product context and guardrails
+globs:
+  - "**/*"
+---
+
+# DeployGuard — Cursor context
+
+## Umbrella
+
+- **Komatik** (parent repo) is the marketplace, prebuild pipeline, and knowledge flywheel.
+- **DeployGuard** is a **Standalone Product**: a GitHub Action distributed via GitHub Marketplace, backed by Komatik Edge Functions for gate evaluation.
+- DeployGuard is also a **first-party tool on the MCP Brokerage** — its health check MCP tools are published there.
+
+## Before large edits
+
+Read **`AGENTS.md`** and **`README.md`**.
+
+## Non-negotiables
+
+1. **Fail-open default** — if DeployGuard is unreachable, deployments proceed with a warning. Never become a deployment bottleneck due to own failures.
+2. **Minimal GitHub permissions** — read PRs, read code, write annotations. No write access to repository code.
+3. **No source code storage** — risk scoring analyzes diffs in-memory. No client code is persisted.
+4. **Test healer proposes, developer approves** — self-healing changes are suggestions, never force-pushed.
+5. **Exhaustive switch** — all `GateDecision` switches must be exhaustive (use `never` assertion).
+
+## Verification
+
+- `npm run build` — TypeScript compiles without errors
+- `npm run lint` — no type errors
