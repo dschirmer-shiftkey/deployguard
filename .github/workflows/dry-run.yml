@@ -17,10 +17,10 @@ on:
       health-check-url:
         description: "Health check URL (optional)"
         required: false
-      token-secret:
-        description: "Name of the secret holding a PAT with target repo access (default: KOMATIK_PAT)"
+      use-komatik-pat:
+        description: "Use KOMATIK_PAT secret for cross-repo access (true/false)"
         required: false
-        default: "KOMATIK_PAT"
+        default: "true"
 
 permissions:
   contents: read
@@ -43,7 +43,7 @@ jobs:
       - name: Run gate evaluation
         id: gate
         env:
-          GITHUB_TOKEN: ${{ secrets[inputs.token-secret] || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ inputs.use-komatik-pat == 'true' && secrets.KOMATIK_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set +e
           OUTPUT=$(npx tsx scripts/simulate.ts \
