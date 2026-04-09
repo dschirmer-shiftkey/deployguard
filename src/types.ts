@@ -55,7 +55,7 @@ export interface DeployGuardConfig {
   apiKey: string;
   apiUrl: string;
   githubToken?: string;
-  healthCheckUrl?: string;
+  healthCheckUrls: string[];
   riskThreshold: number;
   warnThreshold?: number;
   failMode: "open" | "closed";

@@ -15,7 +15,11 @@ inputs:
     required: false
     default: ${{ github.token }}
   health-check-url:
-    description: "Primary health check URL for your production service"
+    description: "(Deprecated — use health-check-urls) Single health check URL"
+    required: false
+    default: ""
+  health-check-urls:
+    description: "Comma-separated URLs to check before deploying (e.g. https://myapp.com/api/health,https://api.myapp.com/health)"
     required: false
     default: ""
   risk-threshold:

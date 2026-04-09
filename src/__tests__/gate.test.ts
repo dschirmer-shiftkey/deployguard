@@ -4,6 +4,8 @@ import {
   isSensitiveFile,
   decideGate,
   checkHealth,
+  checkVercelHealth,
+  checkSupabaseHealth,
   checkMcpHealth,
   postPrComment,
   createCheckRun,
@@ -653,6 +655,191 @@ describe("checkMcpHealth", () => {
     const result = await checkMcpHealth();
     expect(result!.status).toBe("warn");
     expect(result!.detail).toHaveProperty("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkVercelHealth
+// ---------------------------------------------------------------------------
+
+describe("checkVercelHealth", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.VERCEL_TOKEN;
+    delete process.env.VERCEL_PROJECT_ID;
+  });
+
+  it("returns null when env vars are not set", async () => {
+    const result = await checkVercelHealth();
+    expect(result).toBeNull();
+  });
+
+  it("returns null when only token is set without project ID", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    const result = await checkVercelHealth();
+    expect(result).toBeNull();
+  });
+
+  it("returns allow when latest deployment is READY", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          deployments: [{ readyState: "READY", url: "my-app.vercel.app" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await checkVercelHealth();
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("allow");
+    expect(result!.target).toBe("vercel:production");
+    expect(result!.detail).toHaveProperty("readyState", "READY");
+  });
+
+  it("returns block when latest deployment is ERROR", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          deployments: [{ readyState: "ERROR", url: "my-app.vercel.app" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await checkVercelHealth();
+    expect(result!.status).toBe("block");
+  });
+
+  it("returns block when latest deployment is CANCELED", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ deployments: [{ readyState: "CANCELED" }] }), {
+        status: 200,
+      }),
+    );
+    const result = await checkVercelHealth();
+    expect(result!.status).toBe("block");
+  });
+
+  it("returns warn when latest deployment is BUILDING", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ deployments: [{ readyState: "BUILDING" }] }), {
+        status: 200,
+      }),
+    );
+    const result = await checkVercelHealth();
+    expect(result!.status).toBe("warn");
+  });
+
+  it("returns warn when no deployments found", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ deployments: [] }), { status: 200 }),
+    );
+    const result = await checkVercelHealth();
+    expect(result!.status).toBe("warn");
+    expect(result!.detail).toHaveProperty("reason", "no deployments found");
+  });
+
+  it("returns warn when API returns non-200", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("forbidden", { status: 403 }));
+    const result = await checkVercelHealth();
+    expect(result!.status).toBe("warn");
+    expect(result!.detail).toHaveProperty("httpStatus", 403);
+  });
+
+  it("returns warn on network error (fail-open)", async () => {
+    process.env.VERCEL_TOKEN = "test-token";
+    process.env.VERCEL_PROJECT_ID = "prj_test";
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const result = await checkVercelHealth();
+    expect(result!.status).toBe("warn");
+    expect(result!.detail).toHaveProperty("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkSupabaseHealth
+// ---------------------------------------------------------------------------
+
+describe("checkSupabaseHealth", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_ANON_KEY;
+  });
+
+  it("returns null when env vars are not set", async () => {
+    const result = await checkSupabaseHealth();
+    expect(result).toBeNull();
+  });
+
+  it("returns null when only URL is set without key", async () => {
+    process.env.SUPABASE_URL = "https://abc.supabase.co";
+    const result = await checkSupabaseHealth();
+    expect(result).toBeNull();
+  });
+
+  it("returns allow when Supabase REST returns 200", async () => {
+    process.env.SUPABASE_URL = "https://abc.supabase.co";
+    process.env.SUPABASE_ANON_KEY = "test-anon-key";
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    const result = await checkSupabaseHealth();
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("allow");
+    expect(result!.target).toBe("supabase:rest");
+    expect(result!.detail).toHaveProperty("httpStatus", 200);
+  });
+
+  it("returns warn when Supabase REST returns non-200", async () => {
+    process.env.SUPABASE_URL = "https://abc.supabase.co";
+    process.env.SUPABASE_ANON_KEY = "test-anon-key";
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("error", { status: 503 }));
+    const result = await checkSupabaseHealth();
+    expect(result!.status).toBe("warn");
+  });
+
+  it("returns warn on network error (fail-open)", async () => {
+    process.env.SUPABASE_URL = "https://abc.supabase.co";
+    process.env.SUPABASE_ANON_KEY = "test-anon-key";
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const result = await checkSupabaseHealth();
+    expect(result!.status).toBe("warn");
+    expect(result!.detail).toHaveProperty("error");
+  });
+
+  it("sends correct headers to Supabase", async () => {
+    process.env.SUPABASE_URL = "https://abc.supabase.co";
+    process.env.SUPABASE_ANON_KEY = "test-anon-key";
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    await checkSupabaseHealth();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://abc.supabase.co/rest/v1/",
+      expect.objectContaining({
+        headers: {
+          apikey: "test-anon-key",
+          Authorization: "Bearer test-anon-key",
+        },
+      }),
+    );
   });
 });
 

@@ -52,7 +52,10 @@ async function main() {
     apiKey: "local-simulation",
     apiUrl: "https://api.komatik.xyz/deploy/evaluate",
     githubToken: process.env.GITHUB_TOKEN,
-    healthCheckUrl: flags["health-url"] || undefined,
+    healthCheckUrls: (flags["health-url"] || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
     riskThreshold: parseInt(flags["threshold"] ?? "70", 10),
     failMode: "open",
     selfHeal: false,
@@ -73,7 +76,9 @@ async function main() {
   console.log(`  commit:    ${commitSha.substring(0, 7)}`);
   console.log(`  PR:        ${prNumber ?? "(none)"}`);
   console.log(`  threshold: ${config.riskThreshold}`);
-  console.log(`  health:    ${config.healthCheckUrl ?? "(none)"}`);
+  console.log(
+    `  health:    ${config.healthCheckUrls.length > 0 ? config.healthCheckUrls.join(", ") : "(none)"}`,
+  );
   console.log(`  token:     ${config.githubToken ? "***" : "(none)"}`);
   console.log();
 

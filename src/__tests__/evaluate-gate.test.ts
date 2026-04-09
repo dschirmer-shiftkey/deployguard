@@ -61,6 +61,7 @@ function makeConfig(overrides: Partial<DeployGuardConfig> = {}): DeployGuardConf
     addRiskLabels: true,
     reviewersOnRisk: [],
     webhookEvents: ["warn", "block"],
+    healthCheckUrls: [],
     ...overrides,
   };
 }
@@ -118,7 +119,7 @@ describe("evaluateGate (integration)", () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("ok", { status: 200 }));
     const config = makeConfig({
       githubToken: "ghp_test",
-      healthCheckUrl: "https://api.example.com/health",
+      healthCheckUrls: ["https://api.example.com/health"],
     });
     const result = await evaluateGate(config, "abc1234567890", 42);
 
@@ -131,7 +132,7 @@ describe("evaluateGate (integration)", () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("server error", { status: 500 }));
     const config = makeConfig({
       githubToken: "ghp_test",
-      healthCheckUrl: "https://api.example.com/health",
+      healthCheckUrls: ["https://api.example.com/health"],
     });
     const result = await evaluateGate(config, "abc1234567890", 42);
 
@@ -174,7 +175,7 @@ describe("evaluateGate (integration)", () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const config = makeConfig({
       githubToken: "ghp_test",
-      healthCheckUrl: "https://dead-host.example.com/health",
+      healthCheckUrls: ["https://dead-host.example.com/health"],
       riskThreshold: 99,
     });
     const result = await evaluateGate(config, "abc1234567890", 42);
@@ -228,5 +229,32 @@ describe("evaluateGate (integration)", () => {
     const result = await evaluateGate(config, "abc1234567890", 42);
 
     expect(result.id).toMatch(/^dg-abc1234-/);
+  });
+
+  it("performs multiple health checks when multiple URLs are provided", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+      .mockResolvedValueOnce(new Response("error", { status: 503 }));
+    const config = makeConfig({
+      githubToken: "ghp_test",
+      healthCheckUrls: [
+        "https://api.example.com/health",
+        "https://api2.example.com/health",
+      ],
+    });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+
+    expect(result.healthChecks).toHaveLength(2);
+    expect(result.healthChecks[0].status).toBe("allow");
+    expect(result.healthChecks[1].status).toBe("block");
+    expect(result.healthScore).toBe(50);
+  });
+
+  it("returns healthy when no health checks are configured", async () => {
+    const config = makeConfig({ githubToken: "ghp_test", healthCheckUrls: [] });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+
+    expect(result.healthChecks).toHaveLength(0);
+    expect(result.healthScore).toBe(100);
   });
 });
