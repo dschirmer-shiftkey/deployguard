@@ -8,7 +8,7 @@ import {
   managePrLabels,
   requestHighRiskReviewers,
 } from "./gate.js";
-import { sendWebhook } from "./notify.js";
+import { sendWebhook, storeEvaluation } from "./notify.js";
 import { registerHealer, attemptRepair } from "./healers/index.js";
 import { jestHealer } from "./healers/jest.js";
 import { playwrightHealer } from "./healers/playwright.js";
@@ -111,6 +111,7 @@ async function run(): Promise<void> {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      evaluationStoreUrl: core.getInput("evaluation-store-url") || undefined,
     };
 
     const context = github.context;
@@ -145,6 +146,10 @@ async function run(): Promise<void> {
 
     if (config.webhookUrl && config.webhookEvents.includes(evaluation.gateDecision)) {
       await sendWebhook(config.webhookUrl, evaluation);
+    }
+
+    if (config.evaluationStoreUrl) {
+      await storeEvaluation(config.evaluationStoreUrl, evaluation);
     }
 
     switch (evaluation.gateDecision) {

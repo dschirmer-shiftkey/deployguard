@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 import type { GateEvaluation } from "./types.js";
 
 const WEBHOOK_TIMEOUT_MS = 10_000;
+const STORE_TIMEOUT_MS = 10_000;
 
 export async function sendWebhook(
   url: string,
@@ -58,5 +59,35 @@ export async function sendWebhook(
     }
   } catch (error) {
     core.debug(`Webhook delivery failed: ${error}`);
+  }
+}
+
+export async function storeEvaluation(
+  url: string,
+  evaluation: GateEvaluation,
+): Promise<void> {
+  try {
+    const storeSecret = process.env.EVALUATION_STORE_SECRET;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (storeSecret) {
+      headers["Authorization"] = `Bearer ${storeSecret}`;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(evaluation),
+      signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
+    });
+
+    if (response.ok) {
+      core.debug(`Evaluation stored successfully at ${url}`);
+    } else {
+      core.debug(
+        `Evaluation store returned ${response.status} — data may not be persisted`,
+      );
+    }
+  } catch (error) {
+    core.debug(`Evaluation store failed (non-blocking): ${error}`);
   }
 }

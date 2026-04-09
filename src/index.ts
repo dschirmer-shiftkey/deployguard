@@ -13,7 +13,7 @@ export {
   managePrLabels,
   requestHighRiskReviewers,
 } from "./gate.js";
-export { sendWebhook } from "./notify.js";
+export { sendWebhook, storeEvaluation } from "./notify.js";
 export {
   attemptRepair,
   registerHealer,
