@@ -62,48 +62,119 @@ export async function sendWebhook(
   }
 }
 
+async function storeViaApi(
+  url: string,
+  evaluation: GateEvaluation,
+): Promise<boolean> {
+  const storeSecret = process.env.EVALUATION_STORE_SECRET;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (storeSecret) {
+    headers["Authorization"] = `Bearer ${storeSecret}`;
+  }
+
+  const vercelBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (vercelBypass) {
+    headers["x-vercel-protection-bypass"] = vercelBypass;
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(evaluation),
+    signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (response.ok && contentType.includes("application/json")) {
+    core.info(`Evaluation stored successfully at ${url}`);
+    return true;
+  }
+
+  if (!contentType.includes("application/json")) {
+    core.warning(
+      `Evaluation store at ${url} returned HTML instead of JSON (HTTP ${response.status}). ` +
+        `Vercel bot protection is likely blocking the request.`,
+    );
+  } else {
+    core.warning(
+      `Evaluation store returned HTTP ${response.status} — data may not be persisted`,
+    );
+  }
+  return false;
+}
+
+async function storeViaSupabase(evaluation: GateEvaluation): Promise<boolean> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return false;
+  }
+
+  const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/deployguard_evaluations`;
+
+  const row = {
+    id: evaluation.id,
+    repo_id: evaluation.repoId,
+    commit_sha: evaluation.commitSha,
+    pr_number: evaluation.prNumber ?? null,
+    health_score: evaluation.healthScore,
+    risk_score: evaluation.riskScore,
+    gate_decision: evaluation.gateDecision,
+    health_checks: evaluation.healthChecks,
+    risk_factors: evaluation.riskFactors,
+    files: evaluation.files ?? null,
+    evaluation_ms: evaluation.evaluationMs,
+    report_url: evaluation.reportUrl ?? null,
+  };
+
+  const response = await fetch(restUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify(row),
+    signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
+  });
+
+  if (response.ok || response.status === 201) {
+    core.info("Evaluation stored via direct Supabase insert");
+    return true;
+  }
+
+  const body = await response.text().catch(() => "");
+  core.warning(
+    `Supabase direct insert failed (HTTP ${response.status}): ${body}`,
+  );
+  return false;
+}
+
 export async function storeEvaluation(
   url: string,
   evaluation: GateEvaluation,
 ): Promise<void> {
   try {
-    const storeSecret = process.env.EVALUATION_STORE_SECRET;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    };
-    if (storeSecret) {
-      headers["Authorization"] = `Bearer ${storeSecret}`;
-    }
-
-    const vercelBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-    if (vercelBypass) {
-      headers["x-vercel-protection-bypass"] = vercelBypass;
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(evaluation),
-      signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
-    });
-
-    const contentType = response.headers.get("content-type") ?? "";
-
-    if (response.ok && contentType.includes("application/json")) {
-      core.info(`Evaluation stored successfully at ${url}`);
-    } else if (!contentType.includes("application/json")) {
-      core.warning(
-        `Evaluation store at ${url} returned HTML instead of JSON (HTTP ${response.status}). ` +
-          `This usually means Vercel bot protection is blocking the request. ` +
-          `Set VERCEL_AUTOMATION_BYPASS_SECRET in your workflow env to fix this.`,
-      );
-    } else {
-      core.warning(
-        `Evaluation store returned HTTP ${response.status} — data may not be persisted`,
-      );
-    }
+    const stored = await storeViaApi(url, evaluation);
+    if (stored) return;
   } catch (error) {
-    core.warning(`Evaluation store failed (non-blocking): ${error}`);
+    core.warning(`Evaluation store API failed: ${error}`);
   }
+
+  try {
+    const fallback = await storeViaSupabase(evaluation);
+    if (fallback) return;
+  } catch (error) {
+    core.warning(`Supabase direct fallback also failed: ${error}`);
+  }
+
+  core.warning(
+    "Evaluation could not be stored. To fix: either set VERCEL_AUTOMATION_BYPASS_SECRET " +
+      "or set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in your workflow env.",
+  );
 }
