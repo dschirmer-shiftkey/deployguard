@@ -602,11 +602,11 @@ describe("formatGateReport", () => {
   it("includes report URL when provided", () => {
     const evaluation: GateEvaluation = {
       ...baseEvaluation,
-      reportUrl: "https://deployguard.komatik.xyz/reports/abc",
+      reportUrl: "https://example.com/reports/abc",
     };
     const report = formatGateReport(evaluation);
     expect(report).toContain(
-      "[View full report](https://deployguard.komatik.xyz/reports/abc)",
+      "[View full report](https://example.com/reports/abc)",
     );
   });
 

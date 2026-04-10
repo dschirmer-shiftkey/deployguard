@@ -359,14 +359,14 @@ describe("run (main entrypoint)", () => {
   it("stores evaluation when evaluation-store-url is set", async () => {
     setupInputs({
       "api-key": "test-key",
-      "evaluation-store-url": "https://komatik.ai/api/deployguard/store",
+      "evaluation-store-url": "https://example.com/api/deployguard/store",
     });
     const eval_ = makeEvaluation();
     mockEvaluateGate.mockResolvedValue(eval_);
     await runMain();
 
     expect(mockStoreEvaluation).toHaveBeenCalledWith(
-      "https://komatik.ai/api/deployguard/store",
+      "https://example.com/api/deployguard/store",
       eval_,
     );
   });

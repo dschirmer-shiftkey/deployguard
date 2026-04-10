@@ -4,7 +4,7 @@
  *
  * Usage:
  *   npx tsx scripts/simulate.ts
- *   npx tsx scripts/simulate.ts --repo dschirmer-shiftkey/Komatik --pr 625
+ *   npx tsx scripts/simulate.ts --repo owner/repo --pr 123
  *   npx tsx scripts/simulate.ts --health-url https://api.example.com/health
  *   npx tsx scripts/simulate.ts --threshold 50
  *
@@ -31,7 +31,7 @@ async function main() {
     flags["repo"] ??
     process.env.DEPLOYGUARD_TARGET_REPO ??
     process.env.GITHUB_REPOSITORY ??
-    "dschirmer-shiftkey/deployguard";
+    "owner/repo";
 
   const [owner, repo] = targetRepo.split("/");
 
@@ -49,8 +49,8 @@ async function main() {
   type DeployGuardConfig = import("../src/types.js").DeployGuardConfig;
 
   const config: DeployGuardConfig = {
-    apiKey: "local-simulation",
-    apiUrl: "https://api.komatik.xyz/deploy/evaluate",
+    apiKey: "",
+    apiUrl: process.env.DEPLOYGUARD_API_URL || "",
     githubToken: process.env.GITHUB_TOKEN,
     healthCheckUrls: (flags["health-url"] || "")
       .split(",")

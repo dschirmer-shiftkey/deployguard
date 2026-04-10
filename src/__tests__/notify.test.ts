@@ -115,10 +115,10 @@ describe("storeEvaluation", () => {
       new Response('{"stored":true}', { status: 200 }),
     );
     const eval_ = makeEvaluation();
-    await storeEvaluation("https://komatik.ai/api/deployguard/store", eval_);
+    await storeEvaluation("https://example.com/api/deployguard/store", eval_);
 
     expect(fetch).toHaveBeenCalledWith(
-      "https://komatik.ai/api/deployguard/store",
+      "https://example.com/api/deployguard/store",
       expect.objectContaining({ method: "POST" }),
     );
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -132,7 +132,7 @@ describe("storeEvaluation", () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response('{"stored":true}', { status: 200 }),
     );
-    await storeEvaluation("https://komatik.ai/api/deployguard/store", makeEvaluation());
+    await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
 
     const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("Bearer my-secret");
@@ -142,7 +142,7 @@ describe("storeEvaluation", () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response('{"stored":true}', { status: 200 }),
     );
-    await storeEvaluation("https://komatik.ai/api/deployguard/store", makeEvaluation());
+    await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
 
     const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers["Authorization"]).toBeUndefined();
@@ -151,14 +151,14 @@ describe("storeEvaluation", () => {
   it("handles non-200 response gracefully (fail-open)", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("error", { status: 500 }));
     await expect(
-      storeEvaluation("https://komatik.ai/api/deployguard/store", makeEvaluation()),
+      storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation()),
     ).resolves.toBeUndefined();
   });
 
   it("handles network error gracefully (fail-open)", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
     await expect(
-      storeEvaluation("https://komatik.ai/api/deployguard/store", makeEvaluation()),
+      storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation()),
     ).resolves.toBeUndefined();
   });
 });

@@ -30591,7 +30591,7 @@ function decideGate(riskScore, healthScore, blockThreshold, warnThreshold) {
     return "allow";
 }
 // ---------------------------------------------------------------------------
-// Remote Komatik gate API (enrichment layer, fail-open)
+// Remote gate API (enrichment layer, fail-open)
 // ---------------------------------------------------------------------------
 const API_TIMEOUT_MS = 15_000;
 async function callGateApi(config, localEvaluation) {
@@ -31471,7 +31471,7 @@ async function run() {
         initHealers();
         const config = {
             apiKey: core.getInput("api-key") || "",
-            apiUrl: process.env.DEPLOYGUARD_API_URL ?? "https://api.komatik.xyz/deploy/evaluate",
+            apiUrl: process.env.DEPLOYGUARD_API_URL || "",
             githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
             healthCheckUrls: (core.getInput("health-check-urls") || "")
                 .split(",")
