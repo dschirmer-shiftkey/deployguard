@@ -1,0 +1,64 @@
+# Records a successful production deploy against the latest DeployGuard evaluation
+# for the same commit, so trend dashboards can compute correlation (false positive
+# rate, warned → incident, etc.).
+#
+# Prerequisites:
+# - Supabase (or compatible) table with deployguard_evaluations including optional
+#   columns: deploy_outcome, deployed_at, incident_url (see Komatik migrations).
+# - GitHub secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+#
+# Copy to .github/workflows/ and set `branches` to your production branch.
+
+name: DeployGuard deploy correlation
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  record-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark evaluation deployed (success)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REPO_ID: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          REST="${SUPABASE_URL%/}/rest/v1/deployguard_evaluations"
+          DEPLOYED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+          MATCH="$(curl -sS -G "${REST}" \
+            --data-urlencode "select=id" \
+            --data-urlencode "commit_sha=eq.${COMMIT_SHA}" \
+            --data-urlencode "repo_id=eq.${REPO_ID}" \
+            --data-urlencode "order=created_at.desc" \
+            --data-urlencode "limit=1" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}")"
+
+          EVAL_ID="$(echo "${MATCH}" | jq -r '.[0].id // empty')"
+          if [ -z "${EVAL_ID}" ]; then
+            echo "No deployguard_evaluations row for commit ${COMMIT_SHA} — nothing to update."
+            exit 0
+          fi
+
+          CODE="$(curl -sS -o /tmp/patch_body -w "%{http_code}" -X PATCH "${REST}?id=eq.${EVAL_ID}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "{\"deploy_outcome\":\"success\",\"deployed_at\":\"${DEPLOYED_AT}\"}")"
+
+          if [ "${CODE}" = "204" ] || [ "${CODE}" = "200" ]; then
+            echo "Updated evaluation ${EVAL_ID} with deploy_outcome=success"
+          else
+            echo "PATCH failed HTTP ${CODE}: $(cat /tmp/patch_body)"
+            exit 1
+          fi

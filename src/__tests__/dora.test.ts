@@ -15,7 +15,11 @@ vi.mock("@actions/github", () => ({
 }));
 
 import * as github from "@actions/github";
-import { computeDoraMetrics, formatDoraReport } from "../dora.js";
+import {
+  computeDoraMetrics,
+  formatDoraReport,
+  formatDeploymentFrequencyForOutput,
+} from "../dora.js";
 import type { DoraMetrics } from "../dora.js";
 
 function makeOctokit(overrides: Record<string, unknown> = {}) {
@@ -149,6 +153,16 @@ describe("computeDoraMetrics", () => {
   });
 });
 
+describe("formatDeploymentFrequencyForOutput", () => {
+  it("explains an empty deploy window", () => {
+    expect(formatDeploymentFrequencyForOutput(0)).toContain("none in window");
+  });
+
+  it("uses per-week wording when frequency is at least one per week", () => {
+    expect(formatDeploymentFrequencyForOutput(1.2)).toContain("per week");
+  });
+});
+
 describe("formatDoraReport", () => {
   const metrics: DoraMetrics = {
     deploymentFrequency: { deploysPerWeek: 3.5, rating: "high", window: 30 },
@@ -164,7 +178,8 @@ describe("formatDoraReport", () => {
     expect(report).toContain("Deployment Frequency");
     expect(report).toContain("Change Failure Rate");
     expect(report).toContain("Lead Time to Change");
-    expect(report).toContain("3.5/week");
+    expect(report).toContain("3.5%2Fweek");
+    expect(report).toContain("3.5 per week");
     expect(report).toContain("8%");
     expect(report).toContain("4.2 hours");
     expect(report).toContain("HIGH");
@@ -184,7 +199,18 @@ describe("formatDoraReport", () => {
       deploymentFrequency: { deploysPerWeek: 0.5, rating: "medium", window: 30 },
     };
     const report = formatDoraReport(lowFreq);
-    expect(report).toContain("/month");
+    expect(report).toContain("per month");
+    expect(report).toContain("%2Fmonth");
+  });
+
+  it("explains zero deploy frequency instead of 0 per month", () => {
+    const none: DoraMetrics = {
+      ...metrics,
+      deploymentFrequency: { deploysPerWeek: 0, rating: "low", window: 30 },
+    };
+    const report = formatDoraReport(none);
+    expect(report).toContain("none in window");
+    expect(report).not.toContain("0 per month");
   });
 
   it("formats lead time in days when over 24 hours", () => {

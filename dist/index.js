@@ -30126,6 +30126,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.computeDoraMetrics = computeDoraMetrics;
+exports.formatDeploymentFrequencyForOutput = formatDeploymentFrequencyForOutput;
 exports.formatDoraReport = formatDoraReport;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
@@ -30330,6 +30331,30 @@ async function computeDoraMetrics(token, windowDays = 30) {
     };
 }
 // ---------------------------------------------------------------------------
+// Human-readable labels (action outputs + dashboards)
+// ---------------------------------------------------------------------------
+/** Action output and CLI-friendly label; explains empty windows clearly */
+function formatDeploymentFrequencyForOutput(deploysPerWeek) {
+    if (deploysPerWeek <= 0) {
+        return "none in window (no successful default-branch deploy workflows in period)";
+    }
+    if (deploysPerWeek >= 1) {
+        const w = Math.round(deploysPerWeek * 10) / 10;
+        return `${w} per week`;
+    }
+    const perMonth = Math.round(deploysPerWeek * 30 * 10) / 10;
+    return `${perMonth} per month`;
+}
+function formatDeploymentFrequencyCompact(deploysPerWeek) {
+    if (deploysPerWeek <= 0) {
+        return "none";
+    }
+    if (deploysPerWeek >= 1) {
+        return `${Math.round(deploysPerWeek * 10) / 10}/week`;
+    }
+    return `${Math.round(deploysPerWeek * 30 * 10) / 10}/month`;
+}
+// ---------------------------------------------------------------------------
 // Badge + Job Summary formatting
 // ---------------------------------------------------------------------------
 const RATING_COLORS = {
@@ -30347,9 +30372,8 @@ function formatDoraReport(metrics) {
     const df = metrics.deploymentFrequency;
     const cfr = metrics.changeFailureRate;
     const lt = metrics.leadTimeToChange;
-    const dfLabel = df.deploysPerWeek >= 1
-        ? `${df.deploysPerWeek}/week`
-        : `${Math.round(df.deploysPerWeek * 30 * 10) / 10}/month`;
+    const dfLabel = formatDeploymentFrequencyCompact(df.deploysPerWeek);
+    const dfTableLabel = formatDeploymentFrequencyForOutput(df.deploysPerWeek);
     const ltLabel = lt.medianHours >= 24
         ? `${Math.round((lt.medianHours / 24) * 10) / 10} days`
         : `${lt.medianHours} hours`;
@@ -30365,7 +30389,7 @@ function formatDoraReport(metrics) {
         ``,
         `| Metric | Value | Rating |`,
         `|--------|-------|--------|`,
-        `| Deployment Frequency | ${dfLabel} | ${df.rating.toUpperCase()} |`,
+        `| Deployment Frequency | ${dfTableLabel} | ${df.rating.toUpperCase()} |`,
         `| Change Failure Rate | ${cfr.percentage}% (${cfr.failures}/${cfr.total}) | ${cfr.rating.toUpperCase()} |`,
         `| Lead Time to Change | ${ltLabel} (median, ${lt.prCount} PRs) | ${lt.rating.toUpperCase()} |`,
         `| **Overall** | | **${metrics.overallRating.toUpperCase()}** |`,
@@ -31982,9 +32006,7 @@ async function run() {
         if (doraEnabled && config.githubToken) {
             try {
                 const doraMetrics = await (0, dora_js_1.computeDoraMetrics)(config.githubToken, 30);
-                const dfLabel = doraMetrics.deploymentFrequency.deploysPerWeek >= 1
-                    ? `${doraMetrics.deploymentFrequency.deploysPerWeek} per week`
-                    : `${Math.round(doraMetrics.deploymentFrequency.deploysPerWeek * 30 * 10) / 10} per month`;
+                const dfLabel = (0, dora_js_1.formatDeploymentFrequencyForOutput)(doraMetrics.deploymentFrequency.deploysPerWeek);
                 const ltLabel = doraMetrics.leadTimeToChange.medianHours >= 24
                     ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`
                     : `${doraMetrics.leadTimeToChange.medianHours} hours`;

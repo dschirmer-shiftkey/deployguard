@@ -284,6 +284,33 @@ export async function computeDoraMetrics(
 }
 
 // ---------------------------------------------------------------------------
+// Human-readable labels (action outputs + dashboards)
+// ---------------------------------------------------------------------------
+
+/** Action output and CLI-friendly label; explains empty windows clearly */
+export function formatDeploymentFrequencyForOutput(deploysPerWeek: number): string {
+  if (deploysPerWeek <= 0) {
+    return "none in window (no successful default-branch deploy workflows in period)";
+  }
+  if (deploysPerWeek >= 1) {
+    const w = Math.round(deploysPerWeek * 10) / 10;
+    return `${w} per week`;
+  }
+  const perMonth = Math.round(deploysPerWeek * 30 * 10) / 10;
+  return `${perMonth} per month`;
+}
+
+function formatDeploymentFrequencyCompact(deploysPerWeek: number): string {
+  if (deploysPerWeek <= 0) {
+    return "none";
+  }
+  if (deploysPerWeek >= 1) {
+    return `${Math.round(deploysPerWeek * 10) / 10}/week`;
+  }
+  return `${Math.round(deploysPerWeek * 30 * 10) / 10}/month`;
+}
+
+// ---------------------------------------------------------------------------
 // Badge + Job Summary formatting
 // ---------------------------------------------------------------------------
 
@@ -305,9 +332,8 @@ export function formatDoraReport(metrics: DoraMetrics): string {
   const cfr = metrics.changeFailureRate;
   const lt = metrics.leadTimeToChange;
 
-  const dfLabel = df.deploysPerWeek >= 1
-    ? `${df.deploysPerWeek}/week`
-    : `${Math.round(df.deploysPerWeek * 30 * 10) / 10}/month`;
+  const dfLabel = formatDeploymentFrequencyCompact(df.deploysPerWeek);
+  const dfTableLabel = formatDeploymentFrequencyForOutput(df.deploysPerWeek);
 
   const ltLabel = lt.medianHours >= 24
     ? `${Math.round((lt.medianHours / 24) * 10) / 10} days`
@@ -325,7 +351,7 @@ export function formatDoraReport(metrics: DoraMetrics): string {
     ``,
     `| Metric | Value | Rating |`,
     `|--------|-------|--------|`,
-    `| Deployment Frequency | ${dfLabel} | ${df.rating.toUpperCase()} |`,
+    `| Deployment Frequency | ${dfTableLabel} | ${df.rating.toUpperCase()} |`,
     `| Change Failure Rate | ${cfr.percentage}% (${cfr.failures}/${cfr.total}) | ${cfr.rating.toUpperCase()} |`,
     `| Lead Time to Change | ${ltLabel} (median, ${lt.prCount} PRs) | ${lt.rating.toUpperCase()} |`,
     `| **Overall** | | **${metrics.overallRating.toUpperCase()}** |`,

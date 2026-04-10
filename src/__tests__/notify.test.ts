@@ -14,6 +14,13 @@ vi.mock("@actions/github", () => ({
   },
 }));
 
+function jsonResponse(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function makeEvaluation(overrides: Partial<GateEvaluation> = {}): GateEvaluation {
   return {
     id: "dg-test",
@@ -103,17 +110,21 @@ describe("storeEvaluation", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
     delete process.env.EVALUATION_STORE_SECRET;
+    delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env.EVALUATION_STORE_SECRET;
+    delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   it("sends evaluation as POST body", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response('{"stored":true}', { status: 200 }),
-    );
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
     const eval_ = makeEvaluation();
     await storeEvaluation("https://example.com/api/deployguard/store", eval_);
 
@@ -129,27 +140,61 @@ describe("storeEvaluation", () => {
 
   it("includes Authorization header when EVALUATION_STORE_SECRET is set", async () => {
     process.env.EVALUATION_STORE_SECRET = "my-secret";
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response('{"stored":true}', { status: 200 }),
-    );
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
     await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
 
     const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("Bearer my-secret");
   });
 
+  it("sends x-vercel-protection-bypass when VERCEL_AUTOMATION_BYPASS_SECRET is set", async () => {
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET = "bypass-token";
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
+    await storeEvaluation("https://example.com/api/store", makeEvaluation());
+    const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
+    expect(headers["x-vercel-protection-bypass"]).toBe("bypass-token");
+  });
+
   it("omits Authorization header when no secret is set", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response('{"stored":true}', { status: 200 }),
-    );
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
     await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
 
     const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers["Authorization"]).toBeUndefined();
   });
 
-  it("handles non-200 response gracefully (fail-open)", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response("error", { status: 500 }));
+  it("falls back to Supabase REST when primary returns HTML", async () => {
+    process.env.SUPABASE_URL = "https://abc.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response("<html>checkpoint</html>", {
+          status: 429,
+          headers: { "Content-Type": "text/html" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse("", 201));
+
+    await storeEvaluation("https://app.example/api/store", makeEvaluation());
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const supUrl = vi.mocked(fetch).mock.calls[1][0] as string;
+    expect(supUrl).toContain("supabase.co/rest/v1/deployguard_evaluations");
+    const row = JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string);
+    expect(row.gate_decision).toBe("block");
+    expect(row.risk_score).toBe(85);
+  });
+
+  it("handles non-JSON success from primary then skips when no Supabase env", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("<html/>", { status: 200, headers: { "Content-Type": "text/html" } }),
+    );
+    await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles non-200 JSON response gracefully (fail-open)", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"error":"nope"}', 500));
     await expect(
       storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation()),
     ).resolves.toBeUndefined();

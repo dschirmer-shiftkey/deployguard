@@ -84,6 +84,9 @@ function generateWorkflowYml(options: {
   healthCheckUrls: string[];
   doraMetrics: boolean;
   otelEndpoint: string;
+  evaluationStoreUrl: string;
+  storeSecretName: string;
+  supabaseFallback: boolean;
 }): string {
   const lines: string[] = [
     "name: DeployGuard",
@@ -104,6 +107,7 @@ function generateWorkflowYml(options: {
     "      - uses: actions/checkout@v4",
     "",
     "      - uses: dschirmer-shiftkey/deployguard@v2",
+    "        id: gate",
     "        with:",
     `          risk-threshold: "${options.riskThreshold}"`,
   ];
@@ -120,6 +124,50 @@ function generateWorkflowYml(options: {
     lines.push(`          otel-endpoint: "${options.otelEndpoint}"`);
   }
 
+  if (options.evaluationStoreUrl) {
+    lines.push(`          evaluation-store-url: "${options.evaluationStoreUrl}"`);
+    if (options.storeSecretName) {
+      lines.push(
+        `          evaluation-store-secret: \${{ secrets.${options.storeSecretName} }}`,
+      );
+    }
+  }
+
+  const envLines: string[] = [];
+  if (options.evaluationStoreUrl && options.storeSecretName) {
+    envLines.push(
+      `          EVALUATION_STORE_SECRET: \${{ secrets.${options.storeSecretName} }}`,
+    );
+  }
+  if (options.supabaseFallback) {
+    envLines.push(`          SUPABASE_URL: \${{ secrets.SUPABASE_URL }}`);
+    envLines.push(
+      `          SUPABASE_SERVICE_ROLE_KEY: \${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}`,
+    );
+  }
+
+  if (envLines.length > 0) {
+    lines.push("        env:");
+    for (const el of envLines) lines.push(el);
+  }
+
+  if (options.doraMetrics) {
+    lines.push("");
+    lines.push("      - name: DORA outputs");
+    lines.push("        if: always()");
+    lines.push("        run: |");
+    lines.push('          echo "dora-rating:  ${{ steps.gate.outputs.dora-rating }}"');
+    lines.push(
+      '          echo "dora-freq:    ${{ steps.gate.outputs.dora-deployment-frequency }}"',
+    );
+    lines.push(
+      '          echo "dora-cfr:     ${{ steps.gate.outputs.dora-change-failure-rate }}"',
+    );
+    lines.push(
+      '          echo "dora-lead:    ${{ steps.gate.outputs.dora-lead-time }}"',
+    );
+  }
+
   lines.push("");
   return lines.join("\n") + "\n";
 }
@@ -130,7 +178,7 @@ async function main() {
 
   if (command !== "init") {
     print(`
-${BOLD}${GREEN}DeployGuard CLI v2.0.0${RESET}
+${BOLD}${GREEN}DeployGuard CLI v2.2.0${RESET}
 
 ${BOLD}Usage:${RESET}
   npx deployguard init    Interactive setup wizard
@@ -175,6 +223,33 @@ ${BOLD}Learn more:${RESET}
   // OTel
   const otelEndpoint = await ask(rl, `${CYAN}OTLP endpoint${RESET} (blank to skip)`, "");
 
+  // Evaluation store (trend dashboards)
+  const wantStore = await askYN(
+    rl,
+    `${CYAN}POST evaluations to a trend-store URL?${RESET} ${DIM}(optional)${RESET}`,
+    false,
+  );
+  let evaluationStoreUrl = "";
+  let storeSecretName = "";
+  let supabaseFallback = false;
+  if (wantStore) {
+    evaluationStoreUrl = await ask(
+      rl,
+      "Store URL (your API that accepts DeployGuard evaluation JSON)",
+      "",
+    );
+    storeSecretName = await ask(
+      rl,
+      "GitHub Actions secret name for the Bearer token",
+      "INTERNAL_API_SECRET",
+    );
+    supabaseFallback = await askYN(
+      rl,
+      "Include Supabase URL + service role for direct-insert fallback?",
+      true,
+    );
+  }
+
   // Freeze window
   print(`\n${BOLD}Release freeze${RESET} ${DIM}(block deploys during specific times)${RESET}`);
   const wantFreeze = await askYN(rl, "Configure a freeze window?", false);
@@ -213,6 +288,9 @@ ${BOLD}Learn more:${RESET}
     healthCheckUrls,
     doraMetrics,
     otelEndpoint,
+    evaluationStoreUrl,
+    storeSecretName,
+    supabaseFallback,
   });
 
   const workflowPath = path.join(workflowDir, "deployguard.yml");

@@ -9,7 +9,11 @@ import {
   requestHighRiskReviewers,
 } from "./gate.js";
 import { sendWebhook, storeEvaluation } from "./notify.js";
-import { computeDoraMetrics, formatDoraReport } from "./dora.js";
+import {
+  computeDoraMetrics,
+  formatDoraReport,
+  formatDeploymentFrequencyForOutput,
+} from "./dora.js";
 import { exportOtelSpan } from "./otel.js";
 import { registerHealer, attemptRepair } from "./healers/index.js";
 import { jestHealer } from "./healers/jest.js";
@@ -134,9 +138,9 @@ async function run(): Promise<void> {
       try {
         const doraMetrics = await computeDoraMetrics(config.githubToken, 30);
 
-        const dfLabel = doraMetrics.deploymentFrequency.deploysPerWeek >= 1
-          ? `${doraMetrics.deploymentFrequency.deploysPerWeek} per week`
-          : `${Math.round(doraMetrics.deploymentFrequency.deploysPerWeek * 30 * 10) / 10} per month`;
+        const dfLabel = formatDeploymentFrequencyForOutput(
+          doraMetrics.deploymentFrequency.deploysPerWeek,
+        );
 
         const ltLabel = doraMetrics.leadTimeToChange.medianHours >= 24
           ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`

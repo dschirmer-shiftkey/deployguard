@@ -29,7 +29,7 @@ function jsonResult(data: unknown): ToolReturn {
 
 const server = new McpServer({
   name: "deployguard",
-  version: "2.0.0",
+  version: "2.2.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -512,7 +512,7 @@ server.resource(
       mimeType: "application/json",
       text: JSON.stringify({
         name: "deployguard",
-        version: "2.0.0",
+        version: "2.2.0",
         description: "Deployment gate — scores code risk, checks production health, computes DORA metrics.",
         tools: [
           "check-http-health", "check-vercel-health", "check-supabase-health",

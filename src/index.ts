@@ -28,7 +28,11 @@ export { jestHealer } from "./healers/jest.js";
 export { playwrightHealer } from "./healers/playwright.js";
 export { cypressHealer } from "./healers/cypress.js";
 export { loadRepoConfig, matchesGlobs } from "./config.js";
-export { computeDoraMetrics, formatDoraReport } from "./dora.js";
+export {
+  computeDoraMetrics,
+  formatDoraReport,
+  formatDeploymentFrequencyForOutput,
+} from "./dora.js";
 export { exportOtelSpan } from "./otel.js";
 export type {
   DoraMetrics,

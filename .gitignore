@@ -16,5 +16,6 @@ out/
 .env.*.local
 .DS_Store
 coverage/
+cli/dist/
 .turbo/
 .firecrawl/

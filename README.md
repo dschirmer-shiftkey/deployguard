@@ -74,6 +74,7 @@ The weighted average determines the decision:
 | `webhook-url`          | No       | —                     | URL to POST results to (Slack, Discord, custom)                    |
 | `webhook-events`       | No       | `warn,block`          | Which decisions trigger the webhook                                |
 | `evaluation-store-url` | No       | —                     | URL to POST evaluations for trend dashboards                       |
+| `evaluation-store-secret` | No    | —                     | Bearer token for `evaluation-store-url` (or set `EVALUATION_STORE_SECRET` env) |
 | `dora-metrics`         | No       | `false`               | Compute DORA metrics alongside the gate evaluation                 |
 | `otel-endpoint`        | No       | —                     | OTLP HTTP endpoint for exporting evaluation spans                  |
 | `otel-headers`         | No       | —                     | Auth headers for the OTLP endpoint (key=value, comma-separated)    |
@@ -93,6 +94,34 @@ The weighted average determines the decision:
 | `dora-lead-time`            | Lead time to change (e.g. "2.1 hours") — only when `dora-metrics: true`          |
 | `dora-rating`               | Overall DORA rating: ELITE, HIGH, MEDIUM, LOW — only when `dora-metrics: true`   |
 | `dora-json`                 | Full DORA metrics as JSON — only when `dora-metrics: true`                       |
+
+---
+
+## Evaluation store (trend dashboards)
+
+When `evaluation-store-url` points at your API, DeployGuard POSTs each evaluation as JSON (same shape as `evaluation-json`). Authenticate with either:
+
+- **`evaluation-store-secret`** action input, or  
+- **`EVALUATION_STORE_SECRET`** environment variable  
+
+```yaml
+- uses: dschirmer-shiftkey/deployguard@v2
+  with:
+    evaluation-store-url: "https://myapp.com/api/deployguard/store"
+    evaluation-store-secret: ${{ secrets.INTERNAL_API_SECRET }}
+  env:
+    EVALUATION_STORE_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
+```
+
+**Vercel / bot protection:** If the store URL is on a host that serves an HTML challenge to GitHub’s runners (HTTP 429 / non-JSON), set **`VERCEL_AUTOMATION_BYPASS_SECRET`** from [Vercel → Project → Deployment Protection → Protection Bypass for Automation](https://vercel.com/docs/security/deployment-protection#protection-bypass-for-automation) so the action can send `x-vercel-protection-bypass`.
+
+**Supabase fallback:** If the HTTP store fails, the action can insert directly into a `deployguard_evaluations` table when **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`** are set (PostgREST row shape matches the Komatik reference schema: `id`, `repo_id`, `commit_sha`, `pr_number`, scores, `gate_decision`, `health_checks`, `risk_factors`, `files`, `evaluation_ms`, `report_url`).
+
+---
+
+## Deployment correlation (optional)
+
+After a production deploy, record an outcome on the stored evaluation (`deploy_outcome`, `deployed_at`) so dashboards can show warned-vs-incident and false positive rates. Your app can expose a webhook, or you can run a small workflow on `push` to the default branch—see [`examples/github-actions/deployguard-deploy-tracker.yml`](examples/github-actions/deployguard-deploy-tracker.yml). Adapt the table name and filters to match your Supabase schema.
 
 ---
 
@@ -269,9 +298,14 @@ jobs:
           dora-metrics: "true"
           otel-endpoint: ${{ secrets.OTEL_ENDPOINT }}
           otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"
+          evaluation-store-url: "https://myapp.com/api/deployguard/store"
+          evaluation-store-secret: ${{ secrets.INTERNAL_API_SECRET }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVALUATION_STORE_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
 
       - name: Use gate results
         run: |

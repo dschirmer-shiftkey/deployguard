@@ -2,6 +2,37 @@
 
 All notable changes to DeployGuard will be documented in this file.
 
+## [2.2.0] - 2026-04-10
+
+### Added
+
+- **`formatDeploymentFrequencyForOutput()`** in `src/dora.ts` — clear label when no default-branch deploy workflows were detected in the DORA window (avoids confusing “0 per month” in action outputs and job summary tables).
+- **Example workflow** — `examples/github-actions/deployguard-deploy-tracker.yml` patches `deploy_outcome` / `deployed_at` after a production push for dashboard correlation.
+- **`npx deployguard init`** — optional prompts for evaluation store URL, store secret name, and Supabase direct-insert fallback env vars; optional “DORA outputs” echo step when DORA is enabled.
+
+### Changed
+
+- DORA job summary table uses the new human-readable deployment frequency string; badges keep a compact `none` / `N/week` form.
+
+## [2.1.0] - 2026-04-10
+
+### Added
+
+- CLI wizard support for trend-store configuration (evaluation store + Supabase fallback) in generated workflows.
+
+## [2.0.1] - 2026-04-10
+
+### Added
+
+- **`evaluation-store-secret`** action input (mirrors `EVALUATION_STORE_SECRET` env).
+- **Supabase REST fallback** when the primary `evaluation-store-url` returns non-JSON (e.g. Vercel bot protection): set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+- **`VERCEL_AUTOMATION_BYPASS_SECRET`** — sends `x-vercel-protection-bypass` on store POST when set.
+- **Documentation** in README for evaluation storage, Vercel bypass, Supabase fallback, and deployment correlation.
+
+### Changed
+
+- Evaluation store failures now emit **`core.warning`** with actionable text instead of silent `core.debug` only.
+
 ## [2.0.0] - 2026-04-10
 
 ### Added
