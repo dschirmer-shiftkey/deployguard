@@ -1,8 +1,17 @@
 {
   "name": "deployguard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "DeployGuard — self-healing CI/CD deployment gates with MCP-based infrastructure health checks",
+  "description": "Deployment gate for GitHub PRs — scores code risk, checks production health, blocks dangerous releases.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dschirmer-shiftkey/deployguard.git"
+  },
+  "homepage": "https://github.com/dschirmer-shiftkey/deployguard#readme",
+  "bugs": {
+    "url": "https://github.com/dschirmer-shiftkey/deployguard/issues"
+  },
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/main.ts -o dist --source-map --license licenses.txt",

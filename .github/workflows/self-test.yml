@@ -34,14 +34,9 @@ jobs:
         id: gate
         uses: ./
         with:
-          api-key: "self-test"
-          github-token: ${{ github.token }}
           risk-threshold: "85"
           warn-threshold: "50"
-          add-risk-labels: "true"
-          webhook-url: ""
           fail-mode: "open"
-          self-heal: "false"
 
       - name: Print outputs
         if: always()

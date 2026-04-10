@@ -675,14 +675,16 @@ export async function evaluateGate(
     evaluationMs: Date.now() - start,
   };
 
-  const apiResponse = await callGateApi(config, localEvaluation);
-  if (apiResponse) {
-    localEvaluation = {
-      ...localEvaluation,
-      id: apiResponse.id ?? localEvaluation.id,
-      reportUrl: apiResponse.reportUrl ?? localEvaluation.reportUrl,
-      evaluationMs: Date.now() - start,
-    };
+  if (config.apiKey) {
+    const apiResponse = await callGateApi(config, localEvaluation);
+    if (apiResponse) {
+      localEvaluation = {
+        ...localEvaluation,
+        id: apiResponse.id ?? localEvaluation.id,
+        reportUrl: apiResponse.reportUrl ?? localEvaluation.reportUrl,
+        evaluationMs: Date.now() - start,
+      };
+    }
   }
 
   return localEvaluation;

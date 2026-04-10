@@ -1,75 +1,72 @@
 name: "DeployGuard"
-description: "Self-healing CI/CD deployment gate — queries production health, scores risk, blocks dangerous releases"
+description: "Deployment gate for GitHub PRs — scores code risk, checks production health, and blocks dangerous releases."
 author: "Komatik"
 
 branding:
   icon: "shield"
-  color: "blue"
+  color: "green"
 
 inputs:
-  api-key:
-    description: "DeployGuard API key (from komatik.xyz dashboard)"
-    required: true
   github-token:
-    description: "GitHub token for PR file analysis (defaults to automatic token)"
+    description: "GitHub token for PR analysis and comments. Defaults to the automatic workflow token."
     required: false
     default: ${{ github.token }}
-  health-check-url:
-    description: "(Deprecated — use health-check-urls) Single health check URL"
-    required: false
-    default: ""
-  health-check-urls:
-    description: "Comma-separated URLs to check before deploying (e.g. https://myapp.com/api/health,https://api.myapp.com/health)"
-    required: false
-    default: ""
   risk-threshold:
-    description: "Block deployment if risk score exceeds this value (0-100)"
+    description: "Block the PR if the risk score exceeds this value (0-100)."
     required: false
     default: "70"
   warn-threshold:
-    description: "Warn if risk score exceeds this value (0-100, defaults to risk-threshold - 15)"
+    description: "Add a warning if the risk score exceeds this value. Defaults to risk-threshold minus 15."
+    required: false
+    default: ""
+  health-check-urls:
+    description: "Comma-separated URLs to health-check before scoring (omit for risk-only mode)."
     required: false
     default: ""
   fail-mode:
-    description: "Behavior when DeployGuard is unreachable: 'open' (allow deploy) or 'closed' (block deploy)"
+    description: "What to do when DeployGuard itself errors: 'open' allows the deploy, 'closed' blocks it."
     required: false
     default: "open"
   self-heal:
-    description: "Attempt to auto-repair failing tests before blocking"
+    description: "Attempt to auto-repair failing tests before blocking (requires DEPLOYGUARD_TEST_FAILURES env)."
     required: false
-    default: "true"
+    default: "false"
   add-risk-labels:
-    description: "Auto-apply risk-level labels (deployguard:low-risk, etc.) to the PR"
+    description: "Add risk-level labels (deployguard:low-risk, etc.) to the PR. Requires pull-requests: write."
     required: false
     default: "true"
   reviewers-on-risk:
-    description: "Comma-separated GitHub usernames to request as reviewers when decision is warn or block"
+    description: "Comma-separated GitHub usernames to request review from when decision is warn or block."
     required: false
     default: ""
   webhook-url:
-    description: "URL to POST gate evaluation results to (Slack, Discord, or custom endpoint)"
+    description: "URL to POST evaluation results to (Slack, Discord, or custom endpoint). Omit to disable."
     required: false
     default: ""
   webhook-events:
-    description: "Comma-separated decisions that trigger the webhook (e.g. warn,block)"
+    description: "Which decisions trigger the webhook: comma-separated list of allow, warn, block."
     required: false
     default: "warn,block"
   evaluation-store-url:
-    description: "URL to POST evaluation results for historical trend analysis"
+    description: "URL to POST evaluations for historical trend analysis. Omit to disable."
+    required: false
+    default: ""
+  api-key:
+    description: "API key for remote enrichment via a DeployGuard cloud endpoint. Omit for local-only mode."
     required: false
     default: ""
 
 outputs:
   health-score:
-    description: "Infrastructure health score (0-100)"
+    description: "Infrastructure health score (0-100). 100 when no health checks are configured."
   risk-score:
-    description: "Code risk score (0-100)"
+    description: "Code risk score (0-100). Higher means riskier."
   gate-decision:
-    description: "Gate decision: allow, warn, or block"
+    description: "Gate decision: allow, warn, or block."
   report-url:
-    description: "URL to the full evaluation report on the DeployGuard dashboard"
+    description: "URL to the full evaluation report (only set when using a remote API)."
   evaluation-json:
-    description: "Full gate evaluation as JSON for downstream workflow steps"
+    description: "Full gate evaluation as JSON for downstream workflow steps."
 
 runs:
   using: "node20"

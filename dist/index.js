@@ -30679,14 +30679,16 @@ async function evaluateGate(config, commitSha, prNumber) {
         files: fileNames.length > 0 ? fileNames : undefined,
         evaluationMs: Date.now() - start,
     };
-    const apiResponse = await callGateApi(config, localEvaluation);
-    if (apiResponse) {
-        localEvaluation = {
-            ...localEvaluation,
-            id: apiResponse.id ?? localEvaluation.id,
-            reportUrl: apiResponse.reportUrl ?? localEvaluation.reportUrl,
-            evaluationMs: Date.now() - start,
-        };
+    if (config.apiKey) {
+        const apiResponse = await callGateApi(config, localEvaluation);
+        if (apiResponse) {
+            localEvaluation = {
+                ...localEvaluation,
+                id: apiResponse.id ?? localEvaluation.id,
+                reportUrl: apiResponse.reportUrl ?? localEvaluation.reportUrl,
+                evaluationMs: Date.now() - start,
+            };
+        }
     }
     return localEvaluation;
 }
@@ -31468,19 +31470,13 @@ async function run() {
     try {
         initHealers();
         const config = {
-            apiKey: core.getInput("api-key", { required: true }),
+            apiKey: core.getInput("api-key") || "",
             apiUrl: process.env.DEPLOYGUARD_API_URL ?? "https://api.komatik.xyz/deploy/evaluate",
             githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
-            healthCheckUrls: [
-                ...(core.getInput("health-check-urls") || "")
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                ...(core.getInput("health-check-url") || "")
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-            ].filter((v, i, a) => a.indexOf(v) === i),
+            healthCheckUrls: (core.getInput("health-check-urls") || "")
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
             riskThreshold: parseInt(core.getInput("risk-threshold") || "70", 10),
             warnThreshold: core.getInput("warn-threshold")
                 ? parseInt(core.getInput("warn-threshold"), 10)
