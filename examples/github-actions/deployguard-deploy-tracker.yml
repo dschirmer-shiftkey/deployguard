@@ -4,7 +4,7 @@
 #
 # Prerequisites:
 # - Supabase (or compatible) table with deployguard_evaluations including optional
-#   columns: deploy_outcome, deployed_at, incident_url (see Komatik migrations).
+#   Optional columns: deploy_outcome, deployed_at, incident_url (add via your own migration).
 # - GitHub secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 #
 # Copy to .github/workflows/ and set `branches` to your production branch.

@@ -115,7 +115,7 @@ When `evaluation-store-url` points at your API, DeployGuard POSTs each evaluatio
 
 **Vercel / bot protection:** If the store URL is on a host that serves an HTML challenge to GitHub’s runners (HTTP 429 / non-JSON), set **`VERCEL_AUTOMATION_BYPASS_SECRET`** from [Vercel → Project → Deployment Protection → Protection Bypass for Automation](https://vercel.com/docs/security/deployment-protection#protection-bypass-for-automation) so the action can send `x-vercel-protection-bypass`.
 
-**Supabase fallback:** If the HTTP store fails, the action can insert directly into a `deployguard_evaluations` table when **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`** are set (PostgREST row shape matches the Komatik reference schema: `id`, `repo_id`, `commit_sha`, `pr_number`, scores, `gate_decision`, `health_checks`, `risk_factors`, `files`, `evaluation_ms`, `report_url`).
+**Supabase fallback:** If the HTTP store fails, the action can insert directly into a `deployguard_evaluations` table when **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`** are set. Expected columns include `id`, `repo_id`, `commit_sha`, `pr_number`, scores, `gate_decision`, `health_checks`, `risk_factors`, `files`, `evaluation_ms`, `report_url` (add correlation columns such as `deploy_outcome` if you use the deploy-tracker example).
 
 ---
 
