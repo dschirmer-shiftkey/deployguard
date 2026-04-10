@@ -9,6 +9,8 @@ import {
   requestHighRiskReviewers,
 } from "./gate.js";
 import { sendWebhook, storeEvaluation } from "./notify.js";
+import { computeDoraMetrics, formatDoraReport } from "./dora.js";
+import { exportOtelSpan } from "./otel.js";
 import { registerHealer, attemptRepair } from "./healers/index.js";
 import { jestHealer } from "./healers/jest.js";
 import { playwrightHealer } from "./healers/playwright.js";
@@ -126,13 +128,50 @@ async function run(): Promise<void> {
 
     const report = formatGateReport(evaluation, config.riskThreshold);
 
-    await core.summary.addRaw(report).write();
+    let doraReport = "";
+    const doraEnabled = core.getInput("dora-metrics") === "true";
+    if (doraEnabled && config.githubToken) {
+      try {
+        const doraMetrics = await computeDoraMetrics(config.githubToken, 30);
+
+        const dfLabel = doraMetrics.deploymentFrequency.deploysPerWeek >= 1
+          ? `${doraMetrics.deploymentFrequency.deploysPerWeek} per week`
+          : `${Math.round(doraMetrics.deploymentFrequency.deploysPerWeek * 30 * 10) / 10} per month`;
+
+        const ltLabel = doraMetrics.leadTimeToChange.medianHours >= 24
+          ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`
+          : `${doraMetrics.leadTimeToChange.medianHours} hours`;
+
+        core.setOutput("dora-deployment-frequency", dfLabel);
+        core.setOutput("dora-change-failure-rate", `${doraMetrics.changeFailureRate.percentage}%`);
+        core.setOutput("dora-lead-time", ltLabel);
+        core.setOutput("dora-rating", doraMetrics.overallRating.toUpperCase());
+        core.setOutput("dora-json", JSON.stringify(doraMetrics));
+
+        doraReport = formatDoraReport(doraMetrics);
+      } catch (err) {
+        core.debug(`DORA metrics computation failed (non-blocking): ${err}`);
+      }
+    }
+
+    const otelEndpoint = core.getInput("otel-endpoint") || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "";
+    if (otelEndpoint) {
+      const otelHeaders = core.getInput("otel-headers") || process.env.OTEL_EXPORTER_OTLP_HEADERS || "";
+      try {
+        await exportOtelSpan(evaluation, otelEndpoint, otelHeaders);
+      } catch (err) {
+        core.debug(`OTel export failed (non-blocking): ${err}`);
+      }
+    }
+
+    const fullReport = doraReport ? `${report}\n---\n\n${doraReport}` : report;
+    await core.summary.addRaw(fullReport).write();
 
     if (config.githubToken) {
       if (prNumber) {
-        await postPrComment(report, prNumber, config.githubToken);
+        await postPrComment(fullReport, prNumber, config.githubToken);
       }
-      await createCheckRun(evaluation, report, config.githubToken);
+      await createCheckRun(evaluation, fullReport, config.githubToken);
       if (prNumber && config.addRiskLabels) {
         await managePrLabels(prNumber, evaluation.gateDecision, config.githubToken);
       }
@@ -148,10 +187,10 @@ async function run(): Promise<void> {
 
     switch (evaluation.gateDecision) {
       case "allow":
-        core.info(report);
+        core.info(fullReport);
         break;
       case "warn":
-        core.warning(report);
+        core.warning(fullReport);
         if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
           await requestHighRiskReviewers(
             prNumber,

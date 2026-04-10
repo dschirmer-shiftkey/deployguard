@@ -1,10 +1,18 @@
 # DeployGuard
 
-Deployment gate for GitHub PRs. Scores code risk, checks production health, and blocks dangerous releases — all in a single GitHub Action.
+Deployment gate for GitHub PRs. Scores code risk, checks production health, computes DORA metrics, and blocks dangerous releases — all in a single GitHub Action.
 
 ## Quick Start
 
-**1.** Create `.github/workflows/deployguard.yml` in your repo:
+**Option A — Interactive setup:**
+
+```bash
+npx deployguard init
+```
+
+**Option B — Manual setup:**
+
+Create `.github/workflows/deployguard.yml` in your repo:
 
 ```yaml
 name: DeployGuard
@@ -20,31 +28,12 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: dschirmer-shiftkey/deployguard@v1
+      - uses: dschirmer-shiftkey/deployguard@v2
         with:
           risk-threshold: "70"
 ```
 
-**2.** Open a pull request.
-
-**3.** DeployGuard comments a risk report directly on the PR:
-
-```
-## DeployGuard Evaluation
-
-| Metric | Score |
-|--------|-------|
-| Risk   | 42/100 |
-| Decision | ALLOW |
-
-Risk: ████████░░░░░░░░░░░░ 42/100 (threshold: 70)
-
-### Risk Factors
-- file_count — Number of files changed: 60/100
-- code_churn — Sensitivity-weighted lines changed: 35/100
-- test_coverage — test_coverage: 50/100
-- author_history — Author repo familiarity: 0/100
-```
+Open a pull request. DeployGuard comments a risk report directly on the PR.
 
 No API key. No secrets. That's it.
 
@@ -54,13 +43,15 @@ No API key. No secrets. That's it.
 
 DeployGuard analyzes every pull request and produces a **risk score** (0-100) based on:
 
-| Factor            | Weight | What it measures                                                                                    |
-| ----------------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `code_churn`      | 3      | Lines changed, weighted by file sensitivity (auth files 3x, infra 2x, config 0.5x, test files 0.3x) |
-| `sensitive_files` | 3      | Whether the PR touches auth, migrations, payments, CI, or secrets                                   |
-| `file_count`      | 2      | Number of files changed (logarithmic scale)                                                         |
-| `test_coverage`   | 2      | Ratio of test files to source files in the PR                                                       |
-| `author_history`  | 1      | How familiar the author is with the repo (90-day commit count)                                      |
+| Factor               | Weight | What it measures                                                                                     |
+| -------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| `code_churn`         | 3      | Lines changed, weighted by file sensitivity (auth files 3x, infra 2x, config 0.5x, test files 0.3x) |
+| `sensitive_files`    | 3      | Whether the PR touches auth, migrations, payments, CI, or secrets                                    |
+| `file_count`         | 2      | Number of files changed (logarithmic scale)                                                          |
+| `test_coverage`      | 2      | Ratio of test files to source files in the PR                                                        |
+| `dependency_changes` | 2      | Whether dependency manifests or lockfiles were modified                                               |
+| `author_history`     | 1      | How familiar the author is with the repo (90-day commit count)                                       |
+| `pr_age`             | 1      | How long the PR has been open (stale PRs carry more risk)                                            |
 
 The weighted average determines the decision:
 
@@ -83,17 +74,62 @@ The weighted average determines the decision:
 | `webhook-url`          | No       | —                     | URL to POST results to (Slack, Discord, custom)                    |
 | `webhook-events`       | No       | `warn,block`          | Which decisions trigger the webhook                                |
 | `evaluation-store-url` | No       | —                     | URL to POST evaluations for trend dashboards                       |
+| `dora-metrics`         | No       | `false`               | Compute DORA metrics alongside the gate evaluation                 |
+| `otel-endpoint`        | No       | —                     | OTLP HTTP endpoint for exporting evaluation spans                  |
+| `otel-headers`         | No       | —                     | Auth headers for the OTLP endpoint (key=value, comma-separated)    |
 | `api-key`              | No       | —                     | API key for remote enrichment (omit for local-only)                |
 
 ## Outputs
 
-| Output            | Description                                                                      |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `risk-score`      | Code risk score (0-100)                                                          |
-| `health-score`    | Infrastructure health score (0-100, always 100 when no health checks configured) |
-| `gate-decision`   | `allow`, `warn`, or `block`                                                      |
-| `evaluation-json` | Full evaluation as JSON for downstream steps                                     |
-| `report-url`      | Report URL (only when using remote API)                                          |
+| Output                      | Description                                                                      |
+| --------------------------- | -------------------------------------------------------------------------------- |
+| `risk-score`                | Code risk score (0-100)                                                          |
+| `health-score`              | Infrastructure health score (0-100, always 100 when no health checks configured) |
+| `gate-decision`             | `allow`, `warn`, or `block`                                                      |
+| `evaluation-json`           | Full evaluation as JSON for downstream steps                                     |
+| `report-url`                | Report URL (only when using remote API)                                          |
+| `dora-deployment-frequency` | Deployment frequency (e.g. "4.2 per week") — only when `dora-metrics: true`      |
+| `dora-change-failure-rate`  | Change failure rate (e.g. "8.3%") — only when `dora-metrics: true`               |
+| `dora-lead-time`            | Lead time to change (e.g. "2.1 hours") — only when `dora-metrics: true`          |
+| `dora-rating`               | Overall DORA rating: ELITE, HIGH, MEDIUM, LOW — only when `dora-metrics: true`   |
+| `dora-json`                 | Full DORA metrics as JSON — only when `dora-metrics: true`                       |
+
+---
+
+## DORA Metrics
+
+Enable built-in DORA metrics to track deployment health over time:
+
+```yaml
+- uses: dschirmer-shiftkey/deployguard@v2
+  with:
+    risk-threshold: "70"
+    dora-metrics: "true"
+```
+
+DeployGuard computes all four DORA metrics from your GitHub data:
+
+- **Deployment Frequency** — successful workflow runs on the default branch
+- **Change Failure Rate** — ratio of reverts/hotfixes to total merged PRs
+- **Lead Time to Change** — median time from first commit to PR merge
+
+Results appear as shield badges in the Job Summary and are available as action outputs.
+
+---
+
+## OpenTelemetry Export
+
+Pipe evaluation data into your observability stack:
+
+```yaml
+- uses: dschirmer-shiftkey/deployguard@v2
+  with:
+    risk-threshold: "70"
+    otel-endpoint: "https://otel.example.com:4318/v1/traces"
+    otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"
+```
+
+Each evaluation emits a `deployguard.evaluate` span with attributes for risk score, health score, decision, individual risk factors, and DORA metrics.
 
 ---
 
@@ -102,7 +138,7 @@ The weighted average determines the decision:
 Add production health monitoring by passing URLs:
 
 ```yaml
-- uses: dschirmer-shiftkey/deployguard@v1
+- uses: dschirmer-shiftkey/deployguard@v2
   with:
     risk-threshold: "70"
     health-check-urls: "https://myapp.com/api/health"
@@ -150,14 +186,34 @@ thresholds:
 ignore:
   - "*.generated.ts"
   - "package-lock.json"
+
+freeze:
+  - days:
+      - "friday"
+      - "saturday"
+    afterHour: 15
+    message: "No deploys after 3pm Friday through Saturday"
 ```
 
-| Field         | Description                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------------- |
+| Field         | Description                                                                                        |
+| ------------- | -------------------------------------------------------------------------------------------------- |
 | `sensitivity` | Glob patterns for high/medium/low sensitivity files. High = 3x weight, medium = 1.5x, low = 0.5x. |
-| `weights`     | Override default factor weights (scale 0-10). See the factor table above for defaults.            |
-| `thresholds`  | Override the risk/warn thresholds set in the workflow.                                            |
-| `ignore`      | Glob patterns for files to exclude from risk scoring entirely.                                    |
+| `weights`     | Override default factor weights (scale 0-10). See the factor table above for defaults.             |
+| `thresholds`  | Override the risk/warn thresholds set in the workflow.                                             |
+| `ignore`      | Glob patterns for files to exclude from risk scoring entirely.                                     |
+| `freeze`      | Release freeze windows — block deployments during specific days/hours.                             |
+
+---
+
+## Deployment Protection Rule (GitHub App)
+
+For zero-config deployment gates, install the DeployGuard GitHub App. It acts as a native **Custom Deployment Protection Rule** — no workflow changes required:
+
+1. Install the app on your repository
+2. Enable it as a protection rule on your environment (e.g., `production`)
+3. DeployGuard automatically evaluates risk and approves/rejects deployments
+
+See [`app/README.md`](app/README.md) for self-hosting instructions.
 
 ---
 
@@ -166,7 +222,7 @@ ignore:
 Send alerts to Slack (or any endpoint) when DeployGuard warns or blocks:
 
 ```yaml
-- uses: dschirmer-shiftkey/deployguard@v1
+- uses: dschirmer-shiftkey/deployguard@v2
   with:
     risk-threshold: "70"
     webhook-url: ${{ secrets.SLACK_WEBHOOK }}
@@ -179,7 +235,7 @@ The webhook receives a JSON POST with the full evaluation payload.
 
 ## Full Example
 
-A production-grade setup with health checks, Slack, labels, and evaluation storage:
+A production-grade setup with DORA metrics, health checks, OTel, Slack, and labels:
 
 ```yaml
 name: DeployGuard
@@ -200,7 +256,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: dschirmer-shiftkey/deployguard@v1
+      - uses: dschirmer-shiftkey/deployguard@v2
         id: gate
         with:
           risk-threshold: "75"
@@ -210,6 +266,9 @@ jobs:
           reviewers-on-risk: "lead-dev,security-team"
           webhook-url: ${{ secrets.SLACK_WEBHOOK }}
           webhook-events: "warn,block"
+          dora-metrics: "true"
+          otel-endpoint: ${{ secrets.OTEL_ENDPOINT }}
+          otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -219,24 +278,38 @@ jobs:
           echo "Decision: ${{ steps.gate.outputs.gate-decision }}"
           echo "Risk:     ${{ steps.gate.outputs.risk-score }}"
           echo "Health:   ${{ steps.gate.outputs.health-score }}"
+          echo "DORA:     ${{ steps.gate.outputs.dora-rating }}"
 ```
 
 ---
 
 ## MCP Server
 
-DeployGuard ships a standalone [Model Context Protocol](https://modelcontextprotocol.io) server in `mcp/` that exposes health checks and risk scoring as AI-agent-callable tools:
+DeployGuard ships a standalone [Model Context Protocol](https://modelcontextprotocol.io) server in `mcp/` that exposes health checks, risk scoring, and DORA metrics as AI-agent-callable tools:
 
 - `check-http-health` — HTTP endpoint health check
 - `check-vercel-health` — Vercel deployment status
 - `check-supabase-health` — Supabase REST API check
 - `compute-risk-score` — Risk score for a set of changed files
 - `evaluate-deployment` — Full evaluation (health + risk)
+- `get-dora-metrics` — DORA metrics for a repository
+- `compare-risk-history` — Compare risk across recent PRs
+- `explain-risk-factors` — Natural language risk explanation
 
 ```bash
 cd mcp && npm install && npm run build
 node dist/server.js
 ```
+
+---
+
+## CLI
+
+```bash
+npx deployguard init
+```
+
+Interactive wizard that generates `.deployguard.yml` and the workflow YAML. No installation required.
 
 ---
 
