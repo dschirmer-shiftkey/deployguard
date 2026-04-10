@@ -30086,6 +30086,297 @@ function matchesGlobs(filename, patterns) {
 
 /***/ }),
 
+/***/ 2995:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.computeDoraMetrics = computeDoraMetrics;
+exports.formatDoraReport = formatDoraReport;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+function rateDeploymentFrequency(deploysPerWeek) {
+    if (deploysPerWeek >= 7)
+        return "elite";
+    if (deploysPerWeek >= 1)
+        return "high";
+    if (deploysPerWeek >= 1 / 4)
+        return "medium";
+    return "low";
+}
+function rateChangeFailureRate(percentage) {
+    if (percentage <= 5)
+        return "elite";
+    if (percentage <= 10)
+        return "high";
+    if (percentage <= 15)
+        return "medium";
+    return "low";
+}
+function rateLeadTime(medianHours) {
+    if (medianHours <= 24)
+        return "elite";
+    if (medianHours <= 168)
+        return "high";
+    if (medianHours <= 720)
+        return "medium";
+    return "low";
+}
+function overallDoraRating(metrics) {
+    const ratings = [
+        metrics.deploymentFrequency.rating,
+        metrics.changeFailureRate.rating,
+        metrics.leadTimeToChange.rating,
+    ];
+    const order = ["elite", "high", "medium", "low"];
+    const worst = ratings.reduce((acc, r) => (order.indexOf(r) > order.indexOf(acc) ? r : acc), "elite");
+    const best = ratings.reduce((acc, r) => (order.indexOf(r) < order.indexOf(acc) ? r : acc), "low");
+    if (worst === best)
+        return worst;
+    const midIndex = Math.round(ratings.reduce((sum, r) => sum + order.indexOf(r), 0) / ratings.length);
+    return order[Math.min(midIndex, order.length - 1)];
+}
+// ---------------------------------------------------------------------------
+// Deployment Frequency — count workflow runs on default branch
+// ---------------------------------------------------------------------------
+async function computeDeploymentFrequency(token, windowDays) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+        const { data } = await octokit.rest.actions.listWorkflowRunsForRepo({
+            owner,
+            repo,
+            status: "success",
+            created: `>=${since}`,
+            per_page: 100,
+            event: "push",
+        });
+        const { data: repoInfo } = await octokit.rest.repos.get({ owner, repo });
+        const defaultBranch = repoInfo.default_branch;
+        const deployRuns = data.workflow_runs.filter((r) => r.head_branch === defaultBranch);
+        const deployCount = deployRuns.length;
+        const weeks = windowDays / 7;
+        const deploysPerWeek = weeks > 0 ? Math.round((deployCount / weeks) * 100) / 100 : 0;
+        return {
+            deploysPerWeek,
+            rating: rateDeploymentFrequency(deploysPerWeek),
+            window: windowDays,
+        };
+    }
+    catch (error) {
+        core.debug(`DORA deployment frequency failed: ${error}`);
+        return { deploysPerWeek: 0, rating: "low", window: windowDays };
+    }
+}
+// ---------------------------------------------------------------------------
+// Change Failure Rate — ratio of reverts/hotfixes to total merges
+// ---------------------------------------------------------------------------
+async function computeChangeFailureRate(token, windowDays) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+        const merged = await octokit.rest.pulls.list({
+            owner,
+            repo,
+            state: "closed",
+            sort: "updated",
+            direction: "desc",
+            per_page: 100,
+        });
+        const mergedInWindow = merged.data.filter((pr) => pr.merged_at &&
+            new Date(pr.merged_at).toISOString() >= since);
+        const total = mergedInWindow.length;
+        if (total === 0) {
+            return { percentage: 0, failures: 0, total: 0, rating: "elite", window: windowDays };
+        }
+        const FAILURE_PATTERNS = [
+            /\brevert\b/i,
+            /\brollback\b/i,
+            /\bhotfix\b/i,
+            /\bfix.*prod/i,
+            /\bemergency\b/i,
+            /\bincident\b/i,
+        ];
+        const failures = mergedInWindow.filter((pr) => {
+            const text = `${pr.title} ${pr.body ?? ""}`;
+            return FAILURE_PATTERNS.some((p) => p.test(text));
+        }).length;
+        const percentage = Math.round((failures / total) * 1000) / 10;
+        return {
+            percentage,
+            failures,
+            total,
+            rating: rateChangeFailureRate(percentage),
+            window: windowDays,
+        };
+    }
+    catch (error) {
+        core.debug(`DORA change failure rate failed: ${error}`);
+        return { percentage: 0, failures: 0, total: 0, rating: "low", window: windowDays };
+    }
+}
+// ---------------------------------------------------------------------------
+// Lead Time to Change — time from first commit to merge
+// ---------------------------------------------------------------------------
+async function computeLeadTimeToChange(token, windowDays) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+        const { data: prs } = await octokit.rest.pulls.list({
+            owner,
+            repo,
+            state: "closed",
+            sort: "updated",
+            direction: "desc",
+            per_page: 50,
+        });
+        const mergedInWindow = prs.filter((pr) => pr.merged_at &&
+            new Date(pr.merged_at).toISOString() >= since);
+        if (mergedInWindow.length === 0) {
+            return { medianHours: 0, rating: "elite", prCount: 0 };
+        }
+        const leadTimesHours = [];
+        const sampleSize = Math.min(mergedInWindow.length, 20);
+        for (const pr of mergedInWindow.slice(0, sampleSize)) {
+            try {
+                const { data: commits } = await octokit.rest.pulls.listCommits({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    per_page: 1,
+                });
+                if (commits.length > 0 && pr.merged_at) {
+                    const firstCommitDate = commits[0].commit.committer?.date ??
+                        commits[0].commit.author?.date;
+                    if (firstCommitDate) {
+                        const leadMs = new Date(pr.merged_at).getTime() - new Date(firstCommitDate).getTime();
+                        leadTimesHours.push(Math.max(0, leadMs / (1000 * 60 * 60)));
+                    }
+                }
+            }
+            catch {
+                // skip PRs we can't fetch commits for
+            }
+        }
+        if (leadTimesHours.length === 0) {
+            return { medianHours: 0, rating: "elite", prCount: 0 };
+        }
+        leadTimesHours.sort((a, b) => a - b);
+        const mid = Math.floor(leadTimesHours.length / 2);
+        const medianHours = leadTimesHours.length % 2 === 0
+            ? Math.round(((leadTimesHours[mid - 1] + leadTimesHours[mid]) / 2) * 10) / 10
+            : Math.round(leadTimesHours[mid] * 10) / 10;
+        return {
+            medianHours,
+            rating: rateLeadTime(medianHours),
+            prCount: leadTimesHours.length,
+        };
+    }
+    catch (error) {
+        core.debug(`DORA lead time failed: ${error}`);
+        return { medianHours: 0, rating: "low", prCount: 0 };
+    }
+}
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+async function computeDoraMetrics(token, windowDays = 30) {
+    const [deploymentFrequency, changeFailureRate, leadTimeToChange] = await Promise.all([
+        computeDeploymentFrequency(token, windowDays),
+        computeChangeFailureRate(token, windowDays),
+        computeLeadTimeToChange(token, windowDays),
+    ]);
+    const partial = { deploymentFrequency, changeFailureRate, leadTimeToChange };
+    return {
+        ...partial,
+        overallRating: overallDoraRating(partial),
+    };
+}
+// ---------------------------------------------------------------------------
+// Badge + Job Summary formatting
+// ---------------------------------------------------------------------------
+const RATING_COLORS = {
+    elite: "brightgreen",
+    high: "green",
+    medium: "yellow",
+    low: "red",
+};
+function shieldBadge(label, value, color) {
+    const l = encodeURIComponent(label);
+    const v = encodeURIComponent(value);
+    return `![${label}](https://img.shields.io/badge/${l}-${v}-${color})`;
+}
+function formatDoraReport(metrics) {
+    const df = metrics.deploymentFrequency;
+    const cfr = metrics.changeFailureRate;
+    const lt = metrics.leadTimeToChange;
+    const dfLabel = df.deploysPerWeek >= 1
+        ? `${df.deploysPerWeek}/week`
+        : `${Math.round(df.deploysPerWeek * 30 * 10) / 10}/month`;
+    const ltLabel = lt.medianHours >= 24
+        ? `${Math.round((lt.medianHours / 24) * 10) / 10} days`
+        : `${lt.medianHours} hours`;
+    const lines = [
+        `### DORA Metrics (${df.window}-day window)`,
+        ``,
+        [
+            shieldBadge("deploy frequency", dfLabel, RATING_COLORS[df.rating]),
+            shieldBadge("change failure rate", `${cfr.percentage}%`, RATING_COLORS[cfr.rating]),
+            shieldBadge("lead time", ltLabel, RATING_COLORS[lt.rating]),
+            shieldBadge("DORA rating", metrics.overallRating.toUpperCase(), RATING_COLORS[metrics.overallRating]),
+        ].join(" "),
+        ``,
+        `| Metric | Value | Rating |`,
+        `|--------|-------|--------|`,
+        `| Deployment Frequency | ${dfLabel} | ${df.rating.toUpperCase()} |`,
+        `| Change Failure Rate | ${cfr.percentage}% (${cfr.failures}/${cfr.total}) | ${cfr.rating.toUpperCase()} |`,
+        `| Lead Time to Change | ${ltLabel} (median, ${lt.prCount} PRs) | ${lt.rating.toUpperCase()} |`,
+        `| **Overall** | | **${metrics.overallRating.toUpperCase()}** |`,
+        ``,
+    ];
+    return lines.join("\n");
+}
+
+
+/***/ }),
+
 /***/ 1956:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -30128,6 +30419,8 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.isSensitiveFile = isSensitiveFile;
 exports.sensitivityWeight = sensitivityWeight;
 exports.computeRiskScore = computeRiskScore;
+exports.isRollback = isRollback;
+exports.isInFreezeWindow = isInFreezeWindow;
 exports.checkHealth = checkHealth;
 exports.checkMcpHealth = checkMcpHealth;
 exports.checkVercelHealth = checkVercelHealth;
@@ -30197,6 +30490,8 @@ const FACTOR_WEIGHTS = {
     file_count: 2,
     sensitive_files: 3,
     author_history: 1,
+    dependency_changes: 2,
+    pr_age: 1,
 };
 function isTestFile(filename) {
     return TEST_FILE_PATTERN.test(filename);
@@ -30368,6 +30663,111 @@ async function computeAuthorHistory(prNumber, token) {
     catch {
         return null;
     }
+}
+// ---------------------------------------------------------------------------
+// Dependency change detection
+// ---------------------------------------------------------------------------
+const DEPENDENCY_FILES = [
+    /^package\.json$/,
+    /^package-lock\.json$/,
+    /^yarn\.lock$/,
+    /^pnpm-lock\.yaml$/,
+    /^requirements\.txt$/,
+    /^Pipfile\.lock$/,
+    /^poetry\.lock$/,
+    /^go\.mod$/,
+    /^go\.sum$/,
+    /^Gemfile\.lock$/,
+    /^Cargo\.lock$/,
+    /^composer\.lock$/,
+];
+function detectDependencyChanges(files) {
+    const depFiles = files.filter((f) => DEPENDENCY_FILES.some((p) => p.test(f.filename.replace(/.*\//, ""))));
+    if (depFiles.length === 0)
+        return null;
+    const hasLockfile = depFiles.some((f) => /\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename));
+    const hasManifest = depFiles.some((f) => !(/\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename)));
+    const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
+    const score = Math.min(100, (hasManifest && hasLockfile ? 40 : hasManifest ? 60 : 20) +
+        Math.min(30, Math.round(totalChanges / 100)));
+    return {
+        type: "dependency_changes",
+        score,
+        detail: {
+            files: depFiles.map((f) => f.filename),
+            hasManifest,
+            hasLockfile,
+            totalChanges,
+            description: "Dependencies added or updated",
+        },
+    };
+}
+// ---------------------------------------------------------------------------
+// PR age factor
+// ---------------------------------------------------------------------------
+async function computePrAge(prNumber, token) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const { data: pr } = await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+        });
+        if (!pr.created_at)
+            return null;
+        const createdAt = new Date(pr.created_at).getTime();
+        if (isNaN(createdAt))
+            return null;
+        const ageDays = Math.round((Date.now() - createdAt) / (24 * 60 * 60 * 1000));
+        if (ageDays <= 2)
+            return null;
+        const score = Math.min(100, Math.round(ageDays * 5));
+        return {
+            type: "pr_age",
+            score,
+            detail: {
+                ageDays,
+                createdAt: pr.created_at,
+                description: `PR has been open for ${ageDays} day${ageDays === 1 ? "" : "s"}`,
+            },
+        };
+    }
+    catch {
+        return null;
+    }
+}
+// ---------------------------------------------------------------------------
+// Rollback detection
+// ---------------------------------------------------------------------------
+function isRollback(prTitle) {
+    return /\brevert\b/i.test(prTitle) || /\brollback\b/i.test(prTitle);
+}
+// ---------------------------------------------------------------------------
+// Release freeze window check
+// ---------------------------------------------------------------------------
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+function isInFreezeWindow(freezes, now) {
+    if (freezes.length === 0)
+        return { frozen: false };
+    const d = now ?? new Date();
+    for (const freeze of freezes) {
+        const dayName = DAY_NAMES[d.getUTCDay()];
+        const matchesDay = freeze.days.length === 0 ||
+            freeze.days.some((fd) => fd.toLowerCase() === dayName);
+        if (!matchesDay)
+            continue;
+        const hour = d.getUTCHours();
+        const afterOk = freeze.afterHour === undefined || hour >= freeze.afterHour;
+        const beforeOk = freeze.beforeHour === undefined || hour < freeze.beforeHour;
+        if (afterOk && beforeOk) {
+            return {
+                frozen: true,
+                message: freeze.message ?? `Deployment frozen (${dayName} ${hour}:00 UTC)`,
+            };
+        }
+    }
+    return { frozen: false };
 }
 // ---------------------------------------------------------------------------
 // Health check (HTTP)
@@ -30633,10 +31033,13 @@ async function callGateApi(config, localEvaluation) {
 // ---------------------------------------------------------------------------
 async function evaluateGate(config, commitSha, prNumber) {
     const start = Date.now();
-    const [files, authorFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig,] = await Promise.all([
+    const [files, authorFactor, prAgeFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig,] = await Promise.all([
         prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
         prNumber && config.githubToken
             ? computeAuthorHistory(prNumber, config.githubToken)
+            : Promise.resolve(null),
+        prNumber && config.githubToken
+            ? computePrAge(prNumber, config.githubToken)
             : Promise.resolve(null),
         config.healthCheckUrls.length > 0
             ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
@@ -30648,10 +31051,18 @@ async function evaluateGate(config, commitSha, prNumber) {
     ]);
     const effectiveRiskThreshold = repoConfig?.thresholds.risk ?? config.riskThreshold;
     const effectiveWarnThreshold = repoConfig?.thresholds.warn ?? config.warnThreshold;
-    const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files, repoConfig);
-    if (authorFactor) {
-        riskFactors.push(authorFactor);
+    const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
+    if (freezeCheck.frozen) {
+        core.warning(`Release freeze active: ${freezeCheck.message}`);
     }
+    const { score: localRiskScore, factors: riskFactors } = computeRiskScore(files, repoConfig);
+    if (authorFactor)
+        riskFactors.push(authorFactor);
+    if (prAgeFactor)
+        riskFactors.push(prAgeFactor);
+    const depFactor = detectDependencyChanges(files);
+    if (depFactor)
+        riskFactors.push(depFactor);
     const customWeights = repoConfig?.weights ?? {};
     const riskScore = riskFactors.length > 0
         ? weightedAverageScores(riskFactors, customWeights)
@@ -30664,7 +31075,9 @@ async function evaluateGate(config, commitSha, prNumber) {
     if (mcpCheck)
         healthChecks.push(mcpCheck);
     const healthScore = aggregateHealthScore(healthChecks);
-    const gateDecision = decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
+    const gateDecision = freezeCheck.frozen
+        ? "block"
+        : decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
     const fileNames = files.map((f) => f.filename);
     let localEvaluation = {
         id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
@@ -30950,18 +31363,65 @@ function buildGuidance(evaluation) {
             lines.push(...splits);
         }
     }
+    if (factorTypes.has("dependency_changes")) {
+        const depFactor = evaluation.riskFactors.find((f) => f.type === "dependency_changes");
+        const depDetail = depFactor?.detail;
+        lines.push(`- **Dependency changes** detected in ${depDetail?.files?.length ?? "some"} file(s). ` +
+            `Review added/changed dependencies for security and compatibility.`);
+    }
+    const prAgeFactor = evaluation.riskFactors.find((f) => f.type === "pr_age");
+    if (prAgeFactor && prAgeFactor.score >= 30) {
+        const ageDetail = prAgeFactor.detail;
+        lines.push(`- **Stale PR** — open for ${ageDetail?.ageDays ?? "many"} days. ` +
+            `Long-lived PRs accumulate risk from merge conflicts and context loss.`);
+    }
     if (lines.length === 2) {
         lines.push(`- Risk score exceeds threshold. Review the risk factors above before proceeding.`);
     }
     lines.push(``);
     return lines;
 }
+function decisionIcon(decision) {
+    switch (decision) {
+        case "allow": return "✅";
+        case "warn": return "⚠️";
+        case "block": return "🚫";
+        default: return "❓";
+    }
+}
+function riskBadge(score, threshold) {
+    const color = score > threshold ? "red" : score > threshold - 15 ? "yellow" : "brightgreen";
+    return `![Risk Score](https://img.shields.io/badge/risk-${score}%2F100-${color})`;
+}
+function healthBadge(score) {
+    const color = score >= 80 ? "brightgreen" : score >= 50 ? "yellow" : "red";
+    return `![Health](https://img.shields.io/badge/health-${score}%2F100-${color})`;
+}
+function buildFactorChart(factors) {
+    if (factors.length === 0)
+        return [];
+    const sorted = [...factors].sort((a, b) => b.score - a.score);
+    const lines = [];
+    for (const f of sorted) {
+        const barLen = Math.round(f.score / 5);
+        const bar = "█".repeat(barLen) + "░".repeat(20 - barLen);
+        const label = f.type.replace(/_/g, " ");
+        lines.push(`\`${bar}\` ${f.score}/100 — ${label}`);
+    }
+    return lines;
+}
 function formatGateReport(evaluation, riskThreshold) {
+    const icon = decisionIcon(evaluation.gateDecision);
+    const threshold = riskThreshold ?? 70;
     const healthDisplay = evaluation.healthChecks.length > 0
         ? `${evaluation.healthScore}/100`
         : "n/a (not configured)";
     const lines = [
-        `## DeployGuard Evaluation`,
+        `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}`,
+        ``,
+        riskBadge(evaluation.riskScore, threshold) +
+            " " +
+            (evaluation.healthChecks.length > 0 ? healthBadge(evaluation.healthScore) : ""),
         ``,
         `| Metric | Score |`,
         `|--------|-------|`,
@@ -30974,30 +31434,34 @@ function formatGateReport(evaluation, riskThreshold) {
         lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
     }
     if (evaluation.riskFactors.length > 0) {
-        lines.push(`### Risk Factors`, ``);
+        lines.push(`<details><summary><strong>Risk Factor Breakdown</strong> (${evaluation.riskFactors.length} factors)</summary>`, ``);
+        const chart = buildFactorChart(evaluation.riskFactors);
+        lines.push(...chart);
+        lines.push(``);
         for (const factor of evaluation.riskFactors) {
             const detail = factor.detail;
             const desc = detail?.["description"] ?? factor.type;
             lines.push(`- **${factor.type}** — ${desc}: score ${factor.score}/100`);
         }
-        lines.push(``);
+        lines.push(``, `</details>`, ``);
     }
     const guidance = buildGuidance(evaluation);
     if (guidance.length > 0) {
         lines.push(...guidance);
     }
     if (evaluation.healthChecks.length > 0) {
-        lines.push(`### Health Checks`, ``);
+        lines.push(`<details><summary><strong>Health Checks</strong> (${evaluation.healthChecks.length})</summary>`, ``);
         for (const check of evaluation.healthChecks) {
-            lines.push(`- \`${check.target}\` — ${check.status.toUpperCase()} (${check.latencyMs}ms)`);
+            const icon = check.status === "allow" ? "🟢" : check.status === "warn" ? "🟡" : "🔴";
+            lines.push(`${icon} \`${check.target}\` — ${check.status.toUpperCase()} (${check.latencyMs}ms)`);
         }
-        lines.push(``);
+        lines.push(``, `</details>`, ``);
     }
     if (evaluation.files && evaluation.files.length > 0) {
         const sensitiveSet = new Set(evaluation.files.filter((f) => isSensitiveFile(f)));
         lines.push(`<details><summary>Files changed (${evaluation.files.length})</summary>`, ``);
         for (const file of evaluation.files) {
-            const marker = sensitiveSet.has(file) ? " **[!]**" : "";
+            const marker = sensitiveSet.has(file) ? " **⚠ sensitive**" : "";
             lines.push(`- \`${file}\`${marker}`);
         }
         lines.push(``, `</details>`, ``);
@@ -31409,6 +31873,8 @@ const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const gate_js_1 = __nccwpck_require__(1956);
 const notify_js_1 = __nccwpck_require__(1622);
+const dora_js_1 = __nccwpck_require__(2995);
+const otel_js_1 = __nccwpck_require__(2617);
 const index_js_1 = __nccwpck_require__(9114);
 const jest_js_1 = __nccwpck_require__(526);
 const playwright_js_1 = __nccwpck_require__(183);
@@ -31511,12 +31977,45 @@ async function run() {
             core.setOutput("report-url", evaluation.reportUrl);
         }
         const report = (0, gate_js_1.formatGateReport)(evaluation, config.riskThreshold);
-        await core.summary.addRaw(report).write();
+        let doraReport = "";
+        const doraEnabled = core.getInput("dora-metrics") === "true";
+        if (doraEnabled && config.githubToken) {
+            try {
+                const doraMetrics = await (0, dora_js_1.computeDoraMetrics)(config.githubToken, 30);
+                const dfLabel = doraMetrics.deploymentFrequency.deploysPerWeek >= 1
+                    ? `${doraMetrics.deploymentFrequency.deploysPerWeek} per week`
+                    : `${Math.round(doraMetrics.deploymentFrequency.deploysPerWeek * 30 * 10) / 10} per month`;
+                const ltLabel = doraMetrics.leadTimeToChange.medianHours >= 24
+                    ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`
+                    : `${doraMetrics.leadTimeToChange.medianHours} hours`;
+                core.setOutput("dora-deployment-frequency", dfLabel);
+                core.setOutput("dora-change-failure-rate", `${doraMetrics.changeFailureRate.percentage}%`);
+                core.setOutput("dora-lead-time", ltLabel);
+                core.setOutput("dora-rating", doraMetrics.overallRating.toUpperCase());
+                core.setOutput("dora-json", JSON.stringify(doraMetrics));
+                doraReport = (0, dora_js_1.formatDoraReport)(doraMetrics);
+            }
+            catch (err) {
+                core.debug(`DORA metrics computation failed (non-blocking): ${err}`);
+            }
+        }
+        const otelEndpoint = core.getInput("otel-endpoint") || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "";
+        if (otelEndpoint) {
+            const otelHeaders = core.getInput("otel-headers") || process.env.OTEL_EXPORTER_OTLP_HEADERS || "";
+            try {
+                await (0, otel_js_1.exportOtelSpan)(evaluation, otelEndpoint, otelHeaders);
+            }
+            catch (err) {
+                core.debug(`OTel export failed (non-blocking): ${err}`);
+            }
+        }
+        const fullReport = doraReport ? `${report}\n---\n\n${doraReport}` : report;
+        await core.summary.addRaw(fullReport).write();
         if (config.githubToken) {
             if (prNumber) {
-                await (0, gate_js_1.postPrComment)(report, prNumber, config.githubToken);
+                await (0, gate_js_1.postPrComment)(fullReport, prNumber, config.githubToken);
             }
-            await (0, gate_js_1.createCheckRun)(evaluation, report, config.githubToken);
+            await (0, gate_js_1.createCheckRun)(evaluation, fullReport, config.githubToken);
             if (prNumber && config.addRiskLabels) {
                 await (0, gate_js_1.managePrLabels)(prNumber, evaluation.gateDecision, config.githubToken);
             }
@@ -31529,10 +32028,10 @@ async function run() {
         }
         switch (evaluation.gateDecision) {
             case "allow":
-                core.info(report);
+                core.info(fullReport);
                 break;
             case "warn":
-                core.warning(report);
+                core.warning(fullReport);
                 if (config.githubToken && prNumber && config.reviewersOnRisk.length > 0) {
                     await (0, gate_js_1.requestHighRiskReviewers)(prNumber, config.reviewersOnRisk, config.githubToken);
                 }
@@ -31699,13 +32198,173 @@ async function storeEvaluation(url, evaluation) {
 
 /***/ }),
 
+/***/ 2617:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.exportOtelSpan = exportOtelSpan;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+// ---------------------------------------------------------------------------
+// Lightweight OTLP/HTTP JSON span exporter (no SDK dependency)
+// Conforms to opentelemetry-proto ExportTraceServiceRequest JSON encoding.
+// ---------------------------------------------------------------------------
+const OTEL_TIMEOUT_MS = 10_000;
+function hrTimeNano() {
+    const ms = Date.now();
+    return (BigInt(ms) * 1000000n).toString();
+}
+function generateId(bytes) {
+    const hex = "0123456789abcdef";
+    let id = "";
+    for (let i = 0; i < bytes * 2; i++) {
+        id += hex[Math.floor(Math.random() * 16)];
+    }
+    return id;
+}
+function strAttr(key, value) {
+    return { key, value: { stringValue: value } };
+}
+function intAttr(key, value) {
+    return { key, value: { intValue: String(value) } };
+}
+function boolAttr(key, value) {
+    return { key, value: { boolValue: value } };
+}
+async function exportOtelSpan(evaluation, endpoint, headersStr) {
+    const now = hrTimeNano();
+    const startNano = (BigInt(Date.now() - evaluation.evaluationMs) * 1000000n).toString();
+    const { owner, repo } = github.context.repo;
+    const attributes = [
+        strAttr("deployguard.repo", `${owner}/${repo}`),
+        strAttr("deployguard.commit_sha", evaluation.commitSha),
+        strAttr("deployguard.decision", evaluation.gateDecision),
+        intAttr("deployguard.risk_score", evaluation.riskScore),
+        intAttr("deployguard.health_score", evaluation.healthScore),
+        intAttr("deployguard.evaluation_ms", evaluation.evaluationMs),
+        boolAttr("deployguard.has_report_url", !!evaluation.reportUrl),
+    ];
+    if (evaluation.prNumber) {
+        intAttr("deployguard.pr_number", evaluation.prNumber);
+        attributes.push(intAttr("deployguard.pr_number", evaluation.prNumber));
+    }
+    for (const factor of evaluation.riskFactors) {
+        attributes.push(intAttr(`deployguard.factor.${factor.type}`, factor.score));
+    }
+    if (evaluation.files) {
+        attributes.push(intAttr("deployguard.file_count", evaluation.files.length));
+    }
+    for (const hc of evaluation.healthChecks) {
+        attributes.push(strAttr(`deployguard.health.${hc.target}.status`, hc.status));
+        attributes.push(intAttr(`deployguard.health.${hc.target}.latency_ms`, hc.latencyMs));
+    }
+    const statusCode = evaluation.gateDecision === "block" ? 2 : 1;
+    const traceId = generateId(16);
+    const spanId = generateId(8);
+    const payload = {
+        resourceSpans: [
+            {
+                resource: {
+                    attributes: [
+                        strAttr("service.name", "deployguard"),
+                        strAttr("service.version", "2.0.0"),
+                        strAttr("service.namespace", `${owner}/${repo}`),
+                    ],
+                },
+                scopeSpans: [
+                    {
+                        scope: { name: "deployguard", version: "2.0.0" },
+                        spans: [
+                            {
+                                traceId,
+                                spanId,
+                                name: "deployguard.evaluate",
+                                kind: 1, // SPAN_KIND_INTERNAL
+                                startTimeUnixNano: startNano,
+                                endTimeUnixNano: now,
+                                attributes,
+                                status: { code: statusCode },
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+    const url = endpoint.endsWith("/v1/traces") ? endpoint : `${endpoint}/v1/traces`;
+    const headers = { "Content-Type": "application/json" };
+    if (headersStr) {
+        for (const pair of headersStr.split(",")) {
+            const eqIdx = pair.indexOf("=");
+            if (eqIdx > 0) {
+                headers[pair.substring(0, eqIdx).trim()] = pair.substring(eqIdx + 1).trim();
+            }
+        }
+    }
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(OTEL_TIMEOUT_MS),
+        });
+        if (response.ok) {
+            core.debug(`OTel span exported to ${url} (trace_id=${traceId})`);
+        }
+        else {
+            core.debug(`OTel export returned ${response.status}: ${await response.text()}`);
+        }
+    }
+    catch (error) {
+        core.debug(`OTel export failed: ${error}`);
+    }
+}
+
+
+/***/ }),
+
 /***/ 8522:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.RepoConfig = exports.GateApiResponse = exports.GateEvaluation = exports.RiskFactor = exports.HealthCheckResult = exports.GateDecision = void 0;
+exports.RepoConfig = exports.FreezeWindow = exports.GateApiResponse = exports.GateEvaluation = exports.RiskFactor = exports.HealthCheckResult = exports.GateDecision = void 0;
 const zod_1 = __nccwpck_require__(924);
 exports.GateDecision = zod_1.z.enum(["allow", "warn", "block"]);
 exports.HealthCheckResult = zod_1.z.object({
@@ -31721,6 +32380,8 @@ exports.RiskFactor = zod_1.z.object({
         "file_count",
         "sensitive_files",
         "author_history",
+        "dependency_changes",
+        "pr_age",
     ]),
     score: zod_1.z.number().min(0).max(100),
     detail: zod_1.z.record(zod_1.z.unknown()).optional(),
@@ -31748,6 +32409,13 @@ exports.GateApiResponse = zod_1.z.object({
     healthChecks: zod_1.z.array(exports.HealthCheckResult).optional(),
     riskFactors: zod_1.z.array(exports.RiskFactor).optional(),
 });
+exports.FreezeWindow = zod_1.z.object({
+    days: zod_1.z.array(zod_1.z.string()).default([]),
+    afterHour: zod_1.z.number().min(0).max(23).optional(),
+    beforeHour: zod_1.z.number().min(0).max(23).optional(),
+    timezone: zod_1.z.string().default("UTC"),
+    message: zod_1.z.string().optional(),
+});
 exports.RepoConfig = zod_1.z.object({
     sensitivity: zod_1.z
         .object({
@@ -31764,6 +32432,7 @@ exports.RepoConfig = zod_1.z.object({
     })
         .default({}),
     ignore: zod_1.z.array(zod_1.z.string()).default([]),
+    freeze: zod_1.z.array(exports.FreezeWindow).default([]),
 });
 
 

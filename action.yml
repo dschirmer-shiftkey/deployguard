@@ -51,6 +51,18 @@ inputs:
     description: "URL to POST evaluations for historical trend analysis. Omit to disable."
     required: false
     default: ""
+  dora-metrics:
+    description: "Compute DORA metrics (deployment frequency, change failure rate, lead time) alongside the gate evaluation."
+    required: false
+    default: "false"
+  otel-endpoint:
+    description: "OTLP HTTP endpoint to export evaluation spans to (e.g. https://otel.example.com:4318/v1/traces). Omit to disable."
+    required: false
+    default: ""
+  otel-headers:
+    description: "Auth headers for the OTLP endpoint as key=value pairs, comma-separated."
+    required: false
+    default: ""
   api-key:
     description: "API key for remote enrichment via a DeployGuard cloud endpoint. Omit for local-only mode."
     required: false
@@ -67,6 +79,16 @@ outputs:
     description: "URL to the full evaluation report (only set when using a remote API)."
   evaluation-json:
     description: "Full gate evaluation as JSON for downstream workflow steps."
+  dora-deployment-frequency:
+    description: "DORA deployment frequency (e.g. '4.2 per week'). Only set when dora-metrics is true."
+  dora-change-failure-rate:
+    description: "DORA change failure rate percentage (e.g. '8.3%'). Only set when dora-metrics is true."
+  dora-lead-time:
+    description: "DORA lead time to change (e.g. '2.1 hours'). Only set when dora-metrics is true."
+  dora-rating:
+    description: "Overall DORA rating: Elite, High, Medium, or Low. Only set when dora-metrics is true."
+  dora-json:
+    description: "Full DORA metrics as JSON. Only set when dora-metrics is true."
 
 runs:
   using: "node20"

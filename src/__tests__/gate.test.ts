@@ -4,6 +4,7 @@ import {
   isSensitiveFile,
   sensitivityWeight,
   suggestSplitBoundaries,
+  isInFreezeWindow,
   decideGate,
   checkHealth,
   checkVercelHealth,
@@ -590,8 +591,8 @@ describe("formatGateReport", () => {
     const report = formatGateReport(evaluation);
     expect(report).toContain("Files changed (3)");
     expect(report).toContain("`src/utils.ts`");
-    expect(report).toContain("`src/auth/login.ts` **[!]**");
-    expect(report).toContain("`supabase/migrations/001.sql` **[!]**");
+    expect(report).toContain("`src/auth/login.ts` **⚠ sensitive**");
+    expect(report).toContain("`supabase/migrations/001.sql` **⚠ sensitive**");
   });
 
   it("omits file list when no files are present", () => {
@@ -1258,5 +1259,94 @@ describe("postPrComment", () => {
   it("handles API errors gracefully without throwing", async () => {
     mockListComments.mockRejectedValue(new Error("GitHub API error"));
     await expect(postPrComment("## Report", 42, "ghp_test")).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Freeze window
+// ---------------------------------------------------------------------------
+
+describe("isInFreezeWindow", () => {
+  it("returns frozen=false when no freeze windows defined", () => {
+    expect(isInFreezeWindow([])).toEqual({ frozen: false });
+  });
+
+  it("matches a day-based freeze window", () => {
+    const friday3pm = new Date("2026-04-10T15:00:00Z"); // Friday
+    const result = isInFreezeWindow(
+      [{ days: ["friday"], afterHour: 15, timezone: "UTC" }],
+      friday3pm,
+    );
+    expect(result.frozen).toBe(true);
+  });
+
+  it("does not freeze outside the specified hours", () => {
+    const friday10am = new Date("2026-04-10T10:00:00Z"); // Friday
+    const result = isInFreezeWindow(
+      [{ days: ["friday"], afterHour: 15, timezone: "UTC" }],
+      friday10am,
+    );
+    expect(result.frozen).toBe(false);
+  });
+
+  it("does not freeze on the wrong day", () => {
+    const monday3pm = new Date("2026-04-13T15:00:00Z"); // Monday
+    const result = isInFreezeWindow(
+      [{ days: ["friday"], afterHour: 15, timezone: "UTC" }],
+      monday3pm,
+    );
+    expect(result.frozen).toBe(false);
+  });
+
+  it("includes custom message when frozen", () => {
+    const friday3pm = new Date("2026-04-10T15:00:00Z");
+    const result = isInFreezeWindow(
+      [{ days: ["friday"], afterHour: 15, timezone: "UTC", message: "No Friday deploys!" }],
+      friday3pm,
+    );
+    expect(result.frozen).toBe(true);
+    expect(result.message).toBe("No Friday deploys!");
+  });
+
+  it("matches when days array is empty (any day)", () => {
+    const wednesday = new Date("2026-04-08T20:00:00Z");
+    const result = isInFreezeWindow(
+      [{ days: [], afterHour: 18, timezone: "UTC" }],
+      wednesday,
+    );
+    expect(result.frozen).toBe(true);
+  });
+
+  it("supports beforeHour constraint", () => {
+    const earlyMorning = new Date("2026-04-08T05:00:00Z");
+    const result = isInFreezeWindow(
+      [{ days: [], beforeHour: 8, timezone: "UTC" }],
+      earlyMorning,
+    );
+    expect(result.frozen).toBe(true);
+
+    const afternoon = new Date("2026-04-08T14:00:00Z");
+    const result2 = isInFreezeWindow(
+      [{ days: [], beforeHour: 8, timezone: "UTC" }],
+      afternoon,
+    );
+    expect(result2.frozen).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dependency change detection in risk score
+// ---------------------------------------------------------------------------
+
+describe("dependency change detection via computeRiskScore", () => {
+  it("flags package.json changes in risk factors", () => {
+    const files = [
+      { filename: "package.json", additions: 5, deletions: 2, changes: 7 },
+      { filename: "package-lock.json", additions: 200, deletions: 100, changes: 300 },
+      { filename: "src/index.ts", additions: 10, deletions: 5, changes: 15 },
+    ];
+    const { factors } = computeRiskScore(files);
+    expect(factors.some((f) => f.type === "file_count")).toBe(true);
+    expect(factors.some((f) => f.type === "code_churn")).toBe(true);
   });
 });

@@ -1,0 +1,31 @@
+{
+  "name": "deployguard",
+  "version": "2.0.0",
+  "description": "DeployGuard CLI — setup wizard and utilities for the DeployGuard deployment gate",
+  "type": "module",
+  "bin": {
+    "deployguard": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "deploy",
+    "deployment",
+    "gate",
+    "cicd",
+    "github-actions",
+    "risk",
+    "dora"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -2,6 +2,26 @@
 
 All notable changes to DeployGuard will be documented in this file.
 
+## [2.0.0] - 2026-04-10
+
+### Added
+
+- **DORA metrics engine** (`src/dora.ts`) — Computes deployment frequency, change failure rate, and lead time to change from GitHub data. Opt in with `dora-metrics: "true"`. Results appear as shield badges in the Job Summary and as action outputs (`dora-deployment-frequency`, `dora-change-failure-rate`, `dora-lead-time`, `dora-rating`, `dora-json`).
+- **OpenTelemetry span export** (`src/otel.ts`) — Emits a `deployguard.evaluate` span via OTLP/HTTP with attributes for risk score, health score, decision, risk factors, and DORA metrics. No heavy SDK dependency — constructs the JSON payload directly. Configure with `otel-endpoint` and `otel-headers` inputs.
+- **GitHub App for Deployment Protection Rules** (`app/`) — Lightweight Hono webhook server that acts as a native Custom Deployment Protection Rule. Evaluates risk and approves/rejects deployments at the environment level without workflow YAML changes. Includes Dockerfile for self-hosting.
+- **MCP server v2** — Upgraded to v2.0.0 with Server Card resource, and three new tools: `get-dora-metrics`, `compare-risk-history`, `explain-risk-factors`. Existing tools remain backward-compatible.
+- **Dependency change detection** — New `dependency_changes` risk factor detects modifications to `package.json`, lockfiles, `go.mod`, `requirements.txt`, and other dependency manifests. Carries weight 2.
+- **PR age factor** — New `pr_age` risk factor scores PRs higher when they've been open for many days (stale PRs carry more risk from merge conflicts and context loss). Carries weight 1.
+- **Release freeze windows** — New `freeze` config in `.deployguard.yml` blocks deployments during specified days/hours (e.g., no deploys after 3pm Friday). Frozen deploys are automatically blocked.
+- **Rich Job Summary** — PR reports now include shield.io badges, collapsible risk factor breakdown with ASCII bar charts, health check status icons, and improved sensitive file markers.
+- **`npx deployguard init` CLI** (`cli/`) — Interactive setup wizard that generates `.deployguard.yml` and `.github/workflows/deployguard.yml` with guided prompts for thresholds, health checks, DORA, OTel, and freeze windows.
+
+### Changed
+
+- Action now references `@v2`. All workflow examples updated.
+- Report format upgraded: decision icons, badges, collapsible sections, factor charts.
+- Sensitive file markers changed from `**[!]**` to `**⚠ sensitive**` for clarity.
+
 ## [1.0.0] - 2026-04-09
 
 ### Added

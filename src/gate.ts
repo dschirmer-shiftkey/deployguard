@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 import { GateApiResponse as GateApiResponseSchema } from "./types.js";
 import type {
   DeployGuardConfig,
+  FreezeWindow,
   GateApiResponse,
   GateDecision,
   GateEvaluation,
@@ -84,6 +85,8 @@ const FACTOR_WEIGHTS: Record<string, number> = {
   file_count: 2,
   sensitive_files: 3,
   author_history: 1,
+  dependency_changes: 2,
+  pr_age: 1,
 };
 
 function isTestFile(filename: string): boolean {
@@ -300,6 +303,143 @@ async function computeAuthorHistory(
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dependency change detection
+// ---------------------------------------------------------------------------
+
+const DEPENDENCY_FILES = [
+  /^package\.json$/,
+  /^package-lock\.json$/,
+  /^yarn\.lock$/,
+  /^pnpm-lock\.yaml$/,
+  /^requirements\.txt$/,
+  /^Pipfile\.lock$/,
+  /^poetry\.lock$/,
+  /^go\.mod$/,
+  /^go\.sum$/,
+  /^Gemfile\.lock$/,
+  /^Cargo\.lock$/,
+  /^composer\.lock$/,
+];
+
+function detectDependencyChanges(files: PrFileInfo[]): RiskFactor | null {
+  const depFiles = files.filter((f) =>
+    DEPENDENCY_FILES.some((p) => p.test(f.filename.replace(/.*\//, ""))),
+  );
+  if (depFiles.length === 0) return null;
+
+  const hasLockfile = depFiles.some((f) =>
+    /\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename),
+  );
+  const hasManifest = depFiles.some(
+    (f) => !(/\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename)),
+  );
+  const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
+
+  const score = Math.min(
+    100,
+    (hasManifest && hasLockfile ? 40 : hasManifest ? 60 : 20) +
+      Math.min(30, Math.round(totalChanges / 100)),
+  );
+
+  return {
+    type: "dependency_changes",
+    score,
+    detail: {
+      files: depFiles.map((f) => f.filename),
+      hasManifest,
+      hasLockfile,
+      totalChanges,
+      description: "Dependencies added or updated",
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PR age factor
+// ---------------------------------------------------------------------------
+
+async function computePrAge(
+  prNumber: number,
+  token: string,
+): Promise<RiskFactor | null> {
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+
+    const { data: pr } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    if (!pr.created_at) return null;
+
+    const createdAt = new Date(pr.created_at).getTime();
+    if (isNaN(createdAt)) return null;
+
+    const ageDays = Math.round((Date.now() - createdAt) / (24 * 60 * 60 * 1000));
+
+    if (ageDays <= 2) return null;
+
+    const score = Math.min(100, Math.round(ageDays * 5));
+
+    return {
+      type: "pr_age",
+      score,
+      detail: {
+        ageDays,
+        createdAt: pr.created_at,
+        description: `PR has been open for ${ageDays} day${ageDays === 1 ? "" : "s"}`,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rollback detection
+// ---------------------------------------------------------------------------
+
+export function isRollback(prTitle: string): boolean {
+  return /\brevert\b/i.test(prTitle) || /\brollback\b/i.test(prTitle);
+}
+
+// ---------------------------------------------------------------------------
+// Release freeze window check
+// ---------------------------------------------------------------------------
+
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+export function isInFreezeWindow(freezes: FreezeWindow[], now?: Date): { frozen: boolean; message?: string } {
+  if (freezes.length === 0) return { frozen: false };
+
+  const d = now ?? new Date();
+
+  for (const freeze of freezes) {
+    const dayName = DAY_NAMES[d.getUTCDay()];
+    const matchesDay =
+      freeze.days.length === 0 ||
+      freeze.days.some((fd) => fd.toLowerCase() === dayName);
+
+    if (!matchesDay) continue;
+
+    const hour = d.getUTCHours();
+    const afterOk = freeze.afterHour === undefined || hour >= freeze.afterHour;
+    const beforeOk = freeze.beforeHour === undefined || hour < freeze.beforeHour;
+
+    if (afterOk && beforeOk) {
+      return {
+        frozen: true,
+        message: freeze.message ?? `Deployment frozen (${dayName} ${hour}:00 UTC)`,
+      };
+    }
+  }
+
+  return { frozen: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +749,7 @@ export async function evaluateGate(
   const [
     files,
     authorFactor,
+    prAgeFactor,
     httpHealthChecks,
     vercelCheck,
     supabaseCheck,
@@ -618,6 +759,9 @@ export async function evaluateGate(
     prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
     prNumber && config.githubToken
       ? computeAuthorHistory(prNumber, config.githubToken)
+      : Promise.resolve(null),
+    prNumber && config.githubToken
+      ? computePrAge(prNumber, config.githubToken)
       : Promise.resolve(null),
     config.healthCheckUrls.length > 0
       ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
@@ -631,14 +775,21 @@ export async function evaluateGate(
   const effectiveRiskThreshold = repoConfig?.thresholds.risk ?? config.riskThreshold;
   const effectiveWarnThreshold = repoConfig?.thresholds.warn ?? config.warnThreshold;
 
+  const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
+  if (freezeCheck.frozen) {
+    core.warning(`Release freeze active: ${freezeCheck.message}`);
+  }
+
   const { score: localRiskScore, factors: riskFactors } = computeRiskScore(
     files,
     repoConfig,
   );
 
-  if (authorFactor) {
-    riskFactors.push(authorFactor);
-  }
+  if (authorFactor) riskFactors.push(authorFactor);
+  if (prAgeFactor) riskFactors.push(prAgeFactor);
+
+  const depFactor = detectDependencyChanges(files);
+  if (depFactor) riskFactors.push(depFactor);
 
   const customWeights = repoConfig?.weights ?? {};
   const riskScore =
@@ -652,12 +803,9 @@ export async function evaluateGate(
   if (mcpCheck) healthChecks.push(mcpCheck);
 
   const healthScore = aggregateHealthScore(healthChecks);
-  const gateDecision = decideGate(
-    riskScore,
-    healthScore,
-    effectiveRiskThreshold,
-    effectiveWarnThreshold,
-  );
+  const gateDecision = freezeCheck.frozen
+    ? ("block" as GateDecision)
+    : decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
 
   const fileNames = files.map((f) => f.filename);
 
@@ -1010,6 +1158,24 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
     }
   }
 
+  if (factorTypes.has("dependency_changes")) {
+    const depFactor = evaluation.riskFactors.find((f) => f.type === "dependency_changes");
+    const depDetail = depFactor?.detail as { files?: string[] } | undefined;
+    lines.push(
+      `- **Dependency changes** detected in ${depDetail?.files?.length ?? "some"} file(s). ` +
+        `Review added/changed dependencies for security and compatibility.`,
+    );
+  }
+
+  const prAgeFactor = evaluation.riskFactors.find((f) => f.type === "pr_age");
+  if (prAgeFactor && prAgeFactor.score >= 30) {
+    const ageDetail = prAgeFactor.detail as { ageDays?: number } | undefined;
+    lines.push(
+      `- **Stale PR** — open for ${ageDetail?.ageDays ?? "many"} days. ` +
+        `Long-lived PRs accumulate risk from merge conflicts and context loss.`,
+    );
+  }
+
   if (lines.length === 2) {
     lines.push(
       `- Risk score exceeds threshold. Review the risk factors above before proceeding.`,
@@ -1020,17 +1186,55 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
   return lines;
 }
 
+function decisionIcon(decision: GateDecision): string {
+  switch (decision) {
+    case "allow": return "✅";
+    case "warn": return "⚠️";
+    case "block": return "🚫";
+    default: return "❓";
+  }
+}
+
+function riskBadge(score: number, threshold: number): string {
+  const color = score > threshold ? "red" : score > threshold - 15 ? "yellow" : "brightgreen";
+  return `![Risk Score](https://img.shields.io/badge/risk-${score}%2F100-${color})`;
+}
+
+function healthBadge(score: number): string {
+  const color = score >= 80 ? "brightgreen" : score >= 50 ? "yellow" : "red";
+  return `![Health](https://img.shields.io/badge/health-${score}%2F100-${color})`;
+}
+
+function buildFactorChart(factors: GateEvaluation["riskFactors"]): string[] {
+  if (factors.length === 0) return [];
+  const sorted = [...factors].sort((a, b) => b.score - a.score);
+  const lines: string[] = [];
+  for (const f of sorted) {
+    const barLen = Math.round(f.score / 5);
+    const bar = "█".repeat(barLen) + "░".repeat(20 - barLen);
+    const label = f.type.replace(/_/g, " ");
+    lines.push(`\`${bar}\` ${f.score}/100 — ${label}`);
+  }
+  return lines;
+}
+
 export function formatGateReport(
   evaluation: GateEvaluation,
   riskThreshold?: number,
 ): string {
+  const icon = decisionIcon(evaluation.gateDecision);
+  const threshold = riskThreshold ?? 70;
   const healthDisplay =
     evaluation.healthChecks.length > 0
       ? `${evaluation.healthScore}/100`
       : "n/a (not configured)";
 
   const lines: string[] = [
-    `## DeployGuard Evaluation`,
+    `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}`,
+    ``,
+    riskBadge(evaluation.riskScore, threshold) +
+      " " +
+      (evaluation.healthChecks.length > 0 ? healthBadge(evaluation.healthScore) : ""),
     ``,
     `| Metric | Score |`,
     `|--------|-------|`,
@@ -1045,13 +1249,20 @@ export function formatGateReport(
   }
 
   if (evaluation.riskFactors.length > 0) {
-    lines.push(`### Risk Factors`, ``);
+    lines.push(
+      `<details><summary><strong>Risk Factor Breakdown</strong> (${evaluation.riskFactors.length} factors)</summary>`,
+      ``,
+    );
+    const chart = buildFactorChart(evaluation.riskFactors);
+    lines.push(...chart);
+    lines.push(``);
+
     for (const factor of evaluation.riskFactors) {
       const detail = factor.detail as Record<string, unknown> | undefined;
       const desc = (detail?.["description"] as string | undefined) ?? factor.type;
       lines.push(`- **${factor.type}** — ${desc}: score ${factor.score}/100`);
     }
-    lines.push(``);
+    lines.push(``, `</details>`, ``);
   }
 
   const guidance = buildGuidance(evaluation);
@@ -1060,13 +1271,17 @@ export function formatGateReport(
   }
 
   if (evaluation.healthChecks.length > 0) {
-    lines.push(`### Health Checks`, ``);
+    lines.push(
+      `<details><summary><strong>Health Checks</strong> (${evaluation.healthChecks.length})</summary>`,
+      ``,
+    );
     for (const check of evaluation.healthChecks) {
+      const icon = check.status === "allow" ? "🟢" : check.status === "warn" ? "🟡" : "🔴";
       lines.push(
-        `- \`${check.target}\` — ${check.status.toUpperCase()} (${check.latencyMs}ms)`,
+        `${icon} \`${check.target}\` — ${check.status.toUpperCase()} (${check.latencyMs}ms)`,
       );
     }
-    lines.push(``);
+    lines.push(``, `</details>`, ``);
   }
 
   if (evaluation.files && evaluation.files.length > 0) {
@@ -1076,7 +1291,7 @@ export function formatGateReport(
       ``,
     );
     for (const file of evaluation.files) {
-      const marker = sensitiveSet.has(file) ? " **[!]**" : "";
+      const marker = sensitiveSet.has(file) ? " **⚠ sensitive**" : "";
       lines.push(`- \`${file}\`${marker}`);
     }
     lines.push(``, `</details>`, ``);

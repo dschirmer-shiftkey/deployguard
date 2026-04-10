@@ -18,6 +18,8 @@ export const RiskFactor = z.object({
     "file_count",
     "sensitive_files",
     "author_history",
+    "dependency_changes",
+    "pr_age",
   ]),
   score: z.number().min(0).max(100),
   detail: z.record(z.unknown()).optional(),
@@ -51,6 +53,15 @@ export const GateApiResponse = z.object({
 });
 export type GateApiResponse = z.infer<typeof GateApiResponse>;
 
+export const FreezeWindow = z.object({
+  days: z.array(z.string()).default([]),
+  afterHour: z.number().min(0).max(23).optional(),
+  beforeHour: z.number().min(0).max(23).optional(),
+  timezone: z.string().default("UTC"),
+  message: z.string().optional(),
+});
+export type FreezeWindow = z.infer<typeof FreezeWindow>;
+
 export const RepoConfig = z.object({
   sensitivity: z
     .object({
@@ -67,6 +78,7 @@ export const RepoConfig = z.object({
     })
     .default({}),
   ignore: z.array(z.string()).default([]),
+  freeze: z.array(FreezeWindow).default([]),
 });
 export type RepoConfig = z.infer<typeof RepoConfig>;
 
