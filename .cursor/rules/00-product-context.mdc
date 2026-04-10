@@ -1,5 +1,5 @@
 ---
-description: DeployGuard product context and guardrails
+description: DeployGuard product context and guardrails (v2.2+)
 globs:
   - "**/*"
 ---
@@ -8,22 +8,29 @@ globs:
 
 ## What this is
 
-- **DeployGuard** is a GitHub Action that scores pull request risk, checks production health, and blocks dangerous releases.
-- Also published as MCP tools for AI agent consumption.
+- **DeployGuard** — GitHub Action at **`@v2`** (v2.2.x): PR risk scoring, health checks, optional **DORA** metrics, **OpenTelemetry** export, evaluation **store** (HTTP + optional Supabase fallback).
+- **CLI** — `cli/`: `npx deployguard init` generates `.deployguard.yml` + workflow YAML.
+- **MCP** — `mcp/`: standalone tools for agents.
+- **App** — `app/`: optional GitHub App for deployment protection rules.
 
 ## Before large edits
 
-Read **`AGENTS.md`** and **`README.md`**.
+Read **`AGENTS.md`**, **`README.md`**, and **`action.yml`**. If you change inputs/outputs, update **`src/main.ts`** and **`dist/`** (`npm run build`).
 
 ## Non-negotiables
 
-1. **Fail-open default** — if DeployGuard is unreachable, deployments proceed with a warning. Never become a deployment bottleneck due to own failures.
-2. **Minimal GitHub permissions** — read PRs, read code, write annotations. No write access to repository code.
-3. **No source code storage** — risk scoring analyzes diffs in-memory. No client code is persisted.
-4. **Test healer proposes, developer approves** — self-healing changes are suggestions, never force-pushed.
-5. **Exhaustive switch** — all `GateDecision` switches must be exhaustive (use `never` assertion).
+1. **Fail-open** for gate errors (default); **non-blocking** store, webhook, OTel with actionable warnings where applicable.
+2. **Minimal permissions** — no writing repo code from the action; checks/comments/labels only as designed.
+3. **No full source persistence** — evaluations are metadata/scores; optional external store.
+4. **Healers** — suggestions only, never auto-commit.
+5. **Exhaustive `GateDecision`** switches (use `never`).
+
+## Storage edge cases
+
+HTTP **evaluation store** behind **Vercel bot protection** often returns HTML → document **`VERCEL_AUTOMATION_BYPASS_SECRET`** or rely on **`SUPABASE_URL`** + **`SUPABASE_SERVICE_ROLE_KEY`** fallback (`src/notify.ts`).
 
 ## Verification
 
-- `npm run build` — TypeScript compiles without errors
-- `npm run lint` — no type errors
+- `npm test` — Vitest
+- `npm run build` — refresh `dist/index.js`
+- `npm run lint` — ESLint + `tsc` (root); `cd cli && npx tsc` after CLI edits
