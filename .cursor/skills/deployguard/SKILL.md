@@ -8,12 +8,12 @@ description: Load DeployGuard product context for self-healing CI/CD gate develo
 ## When to use
 
 - Any task involving `src/`, `action.yml`, or healer strategies.
-- Questions about how DeployGuard integrates with Komatik, MCP Brokerage, or GitHub Actions.
+- Questions about how DeployGuard integrates with MCP or GitHub Actions.
 - CI/CD gate logic, risk scoring, or infrastructure health checks.
 
 ## Required reading (in order)
 
-1. **`AGENTS.md`** — strategic role, hard rules, conventions.
+1. **`AGENTS.md`** — hard rules, conventions.
 2. **`README.md`** — architecture, usage, key files.
 3. **`action.yml`** — GitHub Action inputs/outputs contract.
 
@@ -24,6 +24,6 @@ description: Load DeployGuard product context for self-healing CI/CD gate develo
 - All `GateDecision` switches are exhaustive.
 - Fail-open behavior preserved in error handling.
 
-## Umbrella one-liner
+## One-liner
 
-**Komatik** = marketplace + pipeline + knowledge. **DeployGuard** = standalone GitHub Action that queries production health via MCP before every deploy, scores risk, and blocks dangerous releases. First-party tool on the MCP Brokerage. Fail-open by default.
+**DeployGuard** = standalone GitHub Action that queries production health via MCP before every deploy, scores risk, and blocks dangerous releases. Fail-open by default.

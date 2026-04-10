@@ -54,7 +54,7 @@ vi.mock("@actions/github", () => ({
 function makeConfig(overrides: Partial<DeployGuardConfig> = {}): DeployGuardConfig {
   return {
     apiKey: "test-key",
-    apiUrl: "https://api.komatik.xyz/deploy/evaluate",
+    apiUrl: "https://api.example.com/deploy/evaluate",
     riskThreshold: 70,
     failMode: "open",
     selfHeal: false,
@@ -190,7 +190,7 @@ describe("evaluateGate (integration)", () => {
       new Response(
         JSON.stringify({
           id: "api-enriched-id",
-          reportUrl: "https://komatik.xyz/reports/123",
+          reportUrl: "https://example.com/reports/123",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -199,7 +199,7 @@ describe("evaluateGate (integration)", () => {
     const result = await evaluateGate(config, "abc1234567890", 42);
 
     expect(result.id).toBe("api-enriched-id");
-    expect(result.reportUrl).toBe("https://komatik.xyz/reports/123");
+    expect(result.reportUrl).toBe("https://example.com/reports/123");
   });
 
   it("falls back to local evaluation when gate API returns non-200", async () => {

@@ -80,7 +80,7 @@ async function run(): Promise<void> {
     const config: DeployGuardConfig = {
       apiKey: core.getInput("api-key") || "",
       apiUrl:
-        process.env.DEPLOYGUARD_API_URL ?? "https://api.komatik.xyz/deploy/evaluate",
+        process.env.DEPLOYGUARD_API_URL || "",
       githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
       healthCheckUrls: (core.getInput("health-check-urls") || "")
         .split(",")

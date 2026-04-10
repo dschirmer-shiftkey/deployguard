@@ -10,7 +10,7 @@ All notable changes to DeployGuard will be documented in this file.
 - **PR split recommendations** — When a PR spans multiple areas (frontend, backend, migrations), the report suggests concrete split boundaries.
 - **Custom risk rules** — Drop a `.deployguard.yml` in your repo to define custom sensitivity patterns, factor weights, threshold overrides, and file ignores.
 - **Deployment correlation** — Track whether warned/blocked PRs caused post-deploy incidents via the deploy-event API. False positive and negative rates visible in trends.
-- **Trend dashboard** — Admin page in Komatik showing decision distribution, risk trends, top risk factors, and recent evaluations with Recharts visualizations.
+- **Trend dashboard** — Admin dashboard showing decision distribution, risk trends, top risk factors, and recent evaluations with Recharts visualizations.
 - **Slack/webhook notifications** — Configurable `webhook-url` and `webhook-events` inputs for real-time Slack or custom endpoint alerts on warn/block decisions.
 - **Evaluation history storage** — `evaluation-store-url` input to persist gate results for historical trend analysis.
 - **MCP tool server** — Standalone MCP server exposing health check and risk scoring functions for AI agent consumption.

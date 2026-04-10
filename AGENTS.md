@@ -1,19 +1,10 @@
 # AGENTS.md — DeployGuard
 
-## Strategic role
+## What this project is
 
-DeployGuard is Komatik's self-healing CI/CD deployment gate product. Distributed
-as a GitHub Action and published as a first-party tool on the MCP Brokerage.
-Priority: Q3-Q4 2026.
-
-## Komatik umbrella (relationship)
-
-- **Parent repo**: [Komatik](https://github.com/dschirmer-shiftkey/Komatik)
-- **Product docs**: `Komatik/docs/products/deployguard/`
-- **This repo is the primary codebase**: The GitHub Action TypeScript source
-  lives here. Gate evaluation Edge Functions live in Komatik.
-- **Published on MCP Brokerage**: Health check MCP tools are first-party
-  entries on the brokerage.
+DeployGuard is a GitHub Action that scores pull request risk, checks production
+health, and blocks dangerous releases. Distributed as a public GitHub Action
+and as MCP tools for AI agent consumption.
 
 ## Hard rules (do not regress)
 
@@ -31,7 +22,6 @@ Priority: Q3-Q4 2026.
 - GitHub Action entry point: `action.yml`
 - Action source in `src/`, compiled to `dist/` via ncc
 - Framework-specific test healers in `src/healers/`
-- Edge Function naming: `gate-evaluate`, `health-check`, `risk-score`, `test-healer`
 - ADR numbering: `ADR-DG-XXX`
 
 ## Quick file map
@@ -49,4 +39,4 @@ Priority: Q3-Q4 2026.
 | `src/__tests__/`           | Vitest tests (gate, integration, healers)                          |
 | `scripts/simulate.ts`      | Local simulation runner                                            |
 | `.github/workflows/ci.yml` | CI pipeline (lint, test, build)                                    |
-| `docs/`                    | Extended documentation                                             |
+| `mcp/`                     | Standalone MCP server for AI agent consumption                     |

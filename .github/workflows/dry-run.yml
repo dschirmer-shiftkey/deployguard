@@ -6,7 +6,7 @@ on:
       target-repo:
         description: "Target repository (owner/repo)"
         required: true
-        default: "dschirmer-shiftkey/Komatik"
+        default: "owner/repo"
       pr-number:
         description: "PR number to evaluate"
         required: true
@@ -17,10 +17,10 @@ on:
       health-check-urls:
         description: "Comma-separated health check URLs (optional)"
         required: false
-      use-komatik-pat:
-        description: "Use KOMATIK_PAT secret for cross-repo access (true/false)"
+      use-cross-repo-pat:
+        description: "Use CROSS_REPO_PAT secret for cross-repo access (true/false)"
         required: false
-        default: "true"
+        default: "false"
 
 permissions:
   contents: read
@@ -45,7 +45,7 @@ jobs:
       - name: Resolve PR head SHA
         id: pr
         env:
-          GITHUB_TOKEN: ${{ inputs.use-komatik-pat == 'true' && secrets.KOMATIK_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ inputs.use-cross-repo-pat == 'true' && secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
           SHA=$(gh api "repos/${{ inputs.target-repo }}/pulls/${{ inputs.pr-number }}" --jq '.head.sha' 2>/dev/null || echo "")
           echo "sha=${SHA:-0000000000000000000000000000000000000000}" >> "$GITHUB_OUTPUT"
@@ -53,7 +53,7 @@ jobs:
       - name: Run gate evaluation
         id: gate
         env:
-          GITHUB_TOKEN: ${{ inputs.use-komatik-pat == 'true' && secrets.KOMATIK_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ inputs.use-cross-repo-pat == 'true' && secrets.CROSS_REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set +e
           OUTPUT=$(npx tsx scripts/simulate.ts \

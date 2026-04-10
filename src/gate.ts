@@ -549,7 +549,7 @@ export function decideGate(
 }
 
 // ---------------------------------------------------------------------------
-// Remote Komatik gate API (enrichment layer, fail-open)
+// Remote gate API (enrichment layer, fail-open)
 // ---------------------------------------------------------------------------
 
 const API_TIMEOUT_MS = 15_000;

@@ -6,11 +6,10 @@ globs:
 
 # DeployGuard — Cursor context
 
-## Umbrella
+## What this is
 
-- **Komatik** (parent repo) is the marketplace, prebuild pipeline, and knowledge flywheel.
-- **DeployGuard** is a **Standalone Product**: a GitHub Action distributed via GitHub Marketplace, backed by Komatik Edge Functions for gate evaluation.
-- DeployGuard is also a **first-party tool on the MCP Brokerage** — its health check MCP tools are published there.
+- **DeployGuard** is a GitHub Action that scores pull request risk, checks production health, and blocks dangerous releases.
+- Also published as MCP tools for AI agent consumption.
 
 ## Before large edits
 
