@@ -51,6 +51,10 @@ inputs:
     description: "URL to POST evaluations for historical trend analysis. Omit to disable."
     required: false
     default: ""
+  evaluation-store-secret:
+    description: "Bearer token for authenticating with the evaluation store endpoint."
+    required: false
+    default: ""
   dora-metrics:
     description: "Compute DORA metrics (deployment frequency, change failure rate, lead time) alongside the gate evaluation."
     required: false

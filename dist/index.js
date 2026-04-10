@@ -32024,6 +32024,10 @@ async function run() {
             await (0, notify_js_1.sendWebhook)(config.webhookUrl, evaluation);
         }
         if (config.evaluationStoreUrl) {
+            const storeSecretInput = core.getInput("evaluation-store-secret");
+            if (storeSecretInput && !process.env.EVALUATION_STORE_SECRET) {
+                process.env.EVALUATION_STORE_SECRET = storeSecretInput;
+            }
             await (0, notify_js_1.storeEvaluation)(config.evaluationStoreUrl, evaluation);
         }
         switch (evaluation.gateDecision) {
@@ -32173,9 +32177,16 @@ async function sendWebhook(url, evaluation) {
 async function storeEvaluation(url, evaluation) {
     try {
         const storeSecret = process.env.EVALUATION_STORE_SECRET;
-        const headers = { "Content-Type": "application/json" };
+        const headers = {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+        };
         if (storeSecret) {
             headers["Authorization"] = `Bearer ${storeSecret}`;
+        }
+        const vercelBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+        if (vercelBypass) {
+            headers["x-vercel-protection-bypass"] = vercelBypass;
         }
         const response = await fetch(url, {
             method: "POST",
@@ -32183,15 +32194,21 @@ async function storeEvaluation(url, evaluation) {
             body: JSON.stringify(evaluation),
             signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
         });
-        if (response.ok) {
-            core.debug(`Evaluation stored successfully at ${url}`);
+        const contentType = response.headers.get("content-type") ?? "";
+        if (response.ok && contentType.includes("application/json")) {
+            core.info(`Evaluation stored successfully at ${url}`);
+        }
+        else if (!contentType.includes("application/json")) {
+            core.warning(`Evaluation store at ${url} returned HTML instead of JSON (HTTP ${response.status}). ` +
+                `This usually means Vercel bot protection is blocking the request. ` +
+                `Set VERCEL_AUTOMATION_BYPASS_SECRET in your workflow env to fix this.`);
         }
         else {
-            core.debug(`Evaluation store returned ${response.status} — data may not be persisted`);
+            core.warning(`Evaluation store returned HTTP ${response.status} — data may not be persisted`);
         }
     }
     catch (error) {
-        core.debug(`Evaluation store failed (non-blocking): ${error}`);
+        core.warning(`Evaluation store failed (non-blocking): ${error}`);
     }
 }
 

@@ -182,6 +182,10 @@ async function run(): Promise<void> {
     }
 
     if (config.evaluationStoreUrl) {
+      const storeSecretInput = core.getInput("evaluation-store-secret");
+      if (storeSecretInput && !process.env.EVALUATION_STORE_SECRET) {
+        process.env.EVALUATION_STORE_SECRET = storeSecretInput;
+      }
       await storeEvaluation(config.evaluationStoreUrl, evaluation);
     }
 
