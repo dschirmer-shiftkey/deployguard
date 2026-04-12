@@ -82,6 +82,34 @@ app/src/handler.ts   → GitHub App webhook handler (imports risk-engine copy)
 2. **Vercel / bot protection:** optional **`VERCEL_AUTOMATION_BYPASS_SECRET`** → `x-vercel-protection-bypass` header.
 3. Fallback: direct **Supabase PostgREST** insert when **`SUPABASE_URL`** + **`SUPABASE_SERVICE_ROLE_KEY`** are set.
 
+## Komatik autonomous workforce
+
+DeployGuard is one of 11 repositories monitored by **Komatik HQ** — a 17-agent autonomous AI workforce running 24/7 on a headless Intel NUC. Agents operate via OpenClaw, coordinate through PostgreSQL + file-based intel, and follow RBAC-enforced tool policies.
+
+**Source of truth**: `dschirmer-shiftkey/komatik-agents` (private).
+**Project tracking**: `projects/deployguard/STATUS.md`, `ROADMAP.md`, `RESEARCH.md` in that repo.
+
+### Agents that interact with this repo
+
+| Agent (codename)          | What it does here                                              |
+| ------------------------- | -------------------------------------------------------------- |
+| Orbit (satellite-watcher) | Scans CI status, open PRs, issues every 12h. Writes STATUS.md  |
+| Sentinel (security-qa)    | Daily security audit. May flag vulnerabilities or open fix PRs |
+| Pixel (frontend-dev)      | Implements features/fixes assigned by coordinator              |
+| Harbor (release-mgr)      | Creates PRs, manages git ops, handles merges                   |
+| Relay (pipeline-ops)      | Monitors CI health, may fix pipeline issues                    |
+| Koda (coordinator)        | Triages findings into tasks, creates multi-agent workflows     |
+
+### Human-in-the-loop
+
+David's Cursor sessions are the **final review gate**. Agent PRs use branch pattern `agent/<agent-name>/<description>` and must be reviewed locally before merge. See `.cursor/skills/review-agent-pr/SKILL.md` for the full review procedure.
+
+### Git conventions (agents)
+
+- Branch: `agent/<agent-name>/<short-description>`
+- Target: `main` (agents should never push directly to `main`)
+- Commits: conventional format (`<type>(<scope>): <description>`)
+
 ## Quick file map
 
 | Path                 | Purpose                                             |

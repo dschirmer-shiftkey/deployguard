@@ -13,6 +13,13 @@ globs:
 - **MCP** — `mcp/`: 12 standalone tools for AI agents (uses shared `risk-engine.ts`).
 - **App** — `app/`: optional GitHub App for deployment protection rules (uses shared `risk-engine.ts`).
 
+## Autonomous agents may have pushed work
+
+This repo is monitored by Komatik HQ (17 autonomous agents, 24/7). Before starting work:
+1. `git fetch origin` — check for remote changes
+2. `gh pr list --state open` — review any agent PRs (branch pattern: `agent/<name>/<desc>`)
+3. Agent PRs must be reviewed locally before merge — see `review-agent-pr` skill
+
 ## Before large edits
 
 Read **`AGENTS.md`**, **`README.md`**, and **`action.yml`**. If you change inputs/outputs, update **`src/main.ts`** and **`dist/`** (`npm run build`).

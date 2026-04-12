@@ -11,6 +11,17 @@ description: Load DeployGuard product context for the deployment gate — Action
 - Evaluation **store**, **webhooks**, **DORA**, **OTel**, or GitHub Actions integration questions.
 - Risk scoring, freeze windows, `.deployguard.yml`, security gate, canary tracking, or MCP tools.
 
+## Before starting work (Komatik agent check)
+
+This repo is monitored 24/7 by **Komatik HQ** (17 autonomous agents). Before starting any work:
+
+1. `git fetch origin` — pull latest refs
+2. `gh pr list --state open` — check for agent PRs (branch: `agent/<name>/<desc>`)
+3. `git log --oneline HEAD..origin/main` — check if remote is ahead
+4. If agent PRs exist, review them first using the **`review-agent-pr`** skill
+
+Key agents: **Orbit** (monitors CI/PRs), **Sentinel** (security audits), **Pixel** (implements), **Harbor** (release ops), **Relay** (pipeline fixes).
+
 ## Required reading (in order)
 
 1. **`AGENTS.md`** — rules, deps, build toolchain, CI pipeline, store/fallback behavior, file map.
