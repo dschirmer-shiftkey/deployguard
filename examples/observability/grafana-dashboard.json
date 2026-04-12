@@ -1,0 +1,476 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_TEMPO",
+      "label": "Tempo",
+      "description": "Tempo data source for DeployGuard traces",
+      "type": "datasource",
+      "pluginId": "tempo",
+      "pluginName": "Tempo"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "tempo",
+      "name": "Tempo",
+      "version": "1.0.0"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "DeployGuard deployment gate — risk scoring, health checks, and gate decisions via OpenTelemetry spans.",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Total Evaluations",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && name = \"deployguard.evaluate\" } | count() by ()"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Block Rate",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.decision = \"block\" } | count() by ()"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Avg Risk Score",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | avg(span.deployguard.risk_score) by ()"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 55 },
+              { "color": "red", "value": 70 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Avg Health Score",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | avg(span.deployguard.health_score) by ()"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 80 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Avg Evaluation Time",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | avg(span.deployguard.evaluation_ms) by ()"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5000 },
+              { "color": "red", "value": 15000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Warn Rate",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.decision = \"warn\" } | count() by ()"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Risk Score Over Time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | rate() by (span.deployguard.decision)",
+          "refId": "decisions"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 15,
+            "pointSize": 5,
+            "showPoints": "auto"
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 55 },
+              { "color": "red", "value": 70 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Gate Decisions",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | count() by (span.deployguard.decision)"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "allow" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#3fb950", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "warn" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#d29922", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "block" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#f85149", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "pieType": "donut",
+        "legend": { "displayMode": "list", "placement": "right" }
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Risk Factors (avg score)",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 4 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.code_churn > 0 } | avg(span.deployguard.factor.code_churn) by ()",
+          "refId": "code_churn"
+        },
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.file_count > 0 } | avg(span.deployguard.factor.file_count) by ()",
+          "refId": "file_count"
+        },
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.sensitive_files > 0 } | avg(span.deployguard.factor.sensitive_files) by ()",
+          "refId": "sensitive_files"
+        },
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.test_coverage > 0 } | avg(span.deployguard.factor.test_coverage) by ()",
+          "refId": "test_coverage"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 40 },
+              { "color": "red", "value": 70 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.7
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Health Check Latency",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | avg(duration) by ()",
+          "refId": "eval_duration"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ns",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5000000000 },
+              { "color": "red", "value": 15000000000 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent Evaluations",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | select(span.deployguard.repo, span.deployguard.commit_sha, span.deployguard.decision, span.deployguard.risk_score, span.deployguard.health_score, span.deployguard.evaluation_ms)"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Time", "desc": true }]
+      },
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "span.deployguard.decision" },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": { "allow": { "color": "green", "text": "ALLOW" } }
+                  },
+                  {
+                    "type": "value",
+                    "options": { "warn": { "color": "yellow", "text": "WARN" } }
+                  },
+                  {
+                    "type": "value",
+                    "options": { "block": { "color": "red", "text": "BLOCK" } }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Evaluations by Repository",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "datasource": "${DS_TEMPO}",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"deployguard\" } | rate() by (resource.service.namespace)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "stacking": { "mode": "normal" }
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["deployguard", "deployment", "otel", "risk"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": "${DS_TEMPO}",
+        "definition": "label_values(resource.service.namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "repository",
+        "query": "label_values(resource.service.namespace)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "DeployGuard — Deployment Gate",
+  "uid": "deployguard-gate",
+  "version": 1
+}
