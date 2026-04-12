@@ -1,10 +1,15 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { handleDeploymentProtectionRule, verifySignature } from "./handler.js";
+import { parseVercelPayload, parseGenericPayload, executeRollback } from "./rollback.js";
 
 const app = new Hono();
 
 app.get("/health", (c) => c.json({ status: "ok", service: "deployguard-app" }));
+
+app.use("/dashboard/*", serveStatic({ root: "./public" }));
+app.get("/dashboard", (c) => c.redirect("/dashboard/dashboard.html"));
 
 app.post("/webhook", async (c) => {
   const event = c.req.header("x-github-event");
@@ -37,12 +42,52 @@ app.post("/webhook/deploy-outcome", async (c) => {
     }
   }
 
+  let payload: unknown;
   try {
-    const payload = JSON.parse(rawBody);
-    return c.json({ received: true, type: payload.type ?? "unknown" });
+    payload = JSON.parse(rawBody);
   } catch {
     return c.json({ error: "invalid JSON" }, 400);
   }
+
+  const webhookType = (payload as Record<string, unknown>).type as string | undefined;
+  const outcome =
+    webhookType === "deployment" || (payload as Record<string, unknown>).payload
+      ? parseVercelPayload(payload)
+      : parseGenericPayload(payload);
+
+  if (!outcome) {
+    return c.json({ received: true, parsed: false, type: webhookType ?? "unknown" });
+  }
+
+  console.log(
+    `[DeployGuard] Deploy outcome: ${outcome.status} for ${outcome.environment} (${outcome.source})`,
+  );
+
+  const rollbackEnabled = process.env.ROLLBACK_ON_FAILURE === "true";
+
+  if (outcome.status === "failure" && rollbackEnabled) {
+    const githubToken = process.env.GITHUB_APP_INSTALLATION_TOKEN;
+    const repoFullName = process.env.GITHUB_REPOSITORY;
+    const rollbackResult = await executeRollback(outcome, githubToken, repoFullName);
+    return c.json({
+      received: true,
+      outcome: {
+        status: outcome.status,
+        environment: outcome.environment,
+        source: outcome.source,
+      },
+      rollback: rollbackResult,
+    });
+  }
+
+  return c.json({
+    received: true,
+    outcome: {
+      status: outcome.status,
+      environment: outcome.environment,
+      source: outcome.source,
+    },
+  });
 });
 
 app.get("/.well-known/deployguard.json", (c) =>

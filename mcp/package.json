@@ -9,7 +9,7 @@
     "deployguard-mcp": "dist/server.js"
   },
   "scripts": {
-    "prebuild": "node -e \"require('fs').copyFileSync('../src/risk-engine.ts','src/risk-engine.ts')\"",
+    "prebuild": "node -e \"const fs=require('fs');fs.copyFileSync('../src/risk-engine.ts','src/risk-engine.ts');fs.mkdirSync('src/adapters',{recursive:true});['types','registry','vercel','supabase','aws-ecs','fly-io','cloudflare','index'].forEach(f=>fs.copyFileSync('../src/adapters/'+f+'.ts','src/adapters/'+f+'.ts'))\"",
     "build": "tsc",
     "start": "node dist/server.js"
   },
