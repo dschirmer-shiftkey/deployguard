@@ -19,3 +19,7 @@ coverage/
 cli/dist/
 .turbo/
 .firecrawl/
+
+# Shared risk-engine copied at build time
+mcp/src/risk-engine.ts
+app/src/risk-engine.ts

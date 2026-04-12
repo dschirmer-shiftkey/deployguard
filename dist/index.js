@@ -29961,8 +29961,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.matchesGlobs = void 0;
 exports.loadRepoConfig = loadRepoConfig;
-exports.matchesGlobs = matchesGlobs;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const types_js_1 = __nccwpck_require__(8522);
@@ -30070,18 +30070,8 @@ async function loadRepoConfig(token) {
         return null;
     }
 }
-function globToRegex(pattern) {
-    const escaped = pattern
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*/g, "<<GLOBSTAR>>")
-        .replace(/\*/g, "[^/]*")
-        .replace(/<<GLOBSTAR>>/g, ".*")
-        .replace(/\?/g, ".");
-    return new RegExp(`^${escaped}$`, "i");
-}
-function matchesGlobs(filename, patterns) {
-    return patterns.some((p) => globToRegex(p).test(filename));
-}
+var risk_engine_js_1 = __nccwpck_require__(1167);
+Object.defineProperty(exports, "matchesGlobs", ({ enumerable: true, get: function () { return risk_engine_js_1.matchesGlobs; } }));
 
 
 /***/ }),
@@ -30157,11 +30147,31 @@ function rateLeadTime(medianHours) {
         return "medium";
     return "low";
 }
+function rateFDRT(medianHours) {
+    if (medianHours <= 1)
+        return "elite";
+    if (medianHours <= 24)
+        return "high";
+    if (medianHours <= 168)
+        return "medium";
+    return "low";
+}
+function rateReworkRate(percentage) {
+    if (percentage <= 5)
+        return "elite";
+    if (percentage <= 10)
+        return "high";
+    if (percentage <= 20)
+        return "medium";
+    return "low";
+}
 function overallDoraRating(metrics) {
     const ratings = [
         metrics.deploymentFrequency.rating,
         metrics.changeFailureRate.rating,
         metrics.leadTimeToChange.rating,
+        metrics.failedDeployRecoveryTime.rating,
+        metrics.changeReworkRate.rating,
     ];
     const order = ["elite", "high", "medium", "low"];
     const worst = ratings.reduce((acc, r) => (order.indexOf(r) > order.indexOf(acc) ? r : acc), "elite");
@@ -30172,13 +30182,29 @@ function overallDoraRating(metrics) {
     return order[Math.min(midIndex, order.length - 1)];
 }
 // ---------------------------------------------------------------------------
-// Deployment Frequency — count workflow runs on default branch
+// Deployment Frequency
 // ---------------------------------------------------------------------------
-async function computeDeploymentFrequency(token, windowDays) {
+async function computeDeploymentFrequency(token, windowDays, environment) {
     try {
         const octokit = github.getOctokit(token);
         const { owner, repo } = github.context.repo;
         const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+        if (environment) {
+            const { data: deployments } = await octokit.request("GET /repos/{owner}/{repo}/deployments", {
+                owner,
+                repo,
+                environment,
+                per_page: 100,
+            });
+            const deploymentsInWindow = deployments.filter((d) => new Date(d.created_at).toISOString() >= since);
+            const weeks = windowDays / 7;
+            const deploysPerWeek = weeks > 0 ? Math.round((deploymentsInWindow.length / weeks) * 100) / 100 : 0;
+            return {
+                deploysPerWeek,
+                rating: rateDeploymentFrequency(deploysPerWeek),
+                window: windowDays,
+            };
+        }
         const { data } = await octokit.rest.actions.listWorkflowRunsForRepo({
             owner,
             repo,
@@ -30205,9 +30231,17 @@ async function computeDeploymentFrequency(token, windowDays) {
     }
 }
 // ---------------------------------------------------------------------------
-// Change Failure Rate — ratio of reverts/hotfixes to total merges
+// Change Failure Rate
 // ---------------------------------------------------------------------------
-async function computeChangeFailureRate(token, windowDays) {
+const FAILURE_PATTERNS = [
+    /\brevert\b/i,
+    /\brollback\b/i,
+    /\bhotfix\b/i,
+    /\bfix.*prod/i,
+    /\bemergency\b/i,
+    /\bincident\b/i,
+];
+async function computeChangeFailureRate(token, windowDays, servicePaths) {
     try {
         const octokit = github.getOctokit(token);
         const { owner, repo } = github.context.repo;
@@ -30220,20 +30254,20 @@ async function computeChangeFailureRate(token, windowDays) {
             direction: "desc",
             per_page: 100,
         });
-        const mergedInWindow = merged.data.filter((pr) => pr.merged_at &&
-            new Date(pr.merged_at).toISOString() >= since);
+        let mergedInWindow = merged.data.filter((pr) => pr.merged_at && new Date(pr.merged_at).toISOString() >= since);
+        if (servicePaths && servicePaths.length > 0) {
+            mergedInWindow = await filterPrsByServicePaths(octokit, owner, repo, mergedInWindow, servicePaths);
+        }
         const total = mergedInWindow.length;
         if (total === 0) {
-            return { percentage: 0, failures: 0, total: 0, rating: "elite", window: windowDays };
+            return {
+                percentage: 0,
+                failures: 0,
+                total: 0,
+                rating: "elite",
+                window: windowDays,
+            };
         }
-        const FAILURE_PATTERNS = [
-            /\brevert\b/i,
-            /\brollback\b/i,
-            /\bhotfix\b/i,
-            /\bfix.*prod/i,
-            /\bemergency\b/i,
-            /\bincident\b/i,
-        ];
         const failures = mergedInWindow.filter((pr) => {
             const text = `${pr.title} ${pr.body ?? ""}`;
             return FAILURE_PATTERNS.some((p) => p.test(text));
@@ -30249,13 +30283,19 @@ async function computeChangeFailureRate(token, windowDays) {
     }
     catch (error) {
         core.debug(`DORA change failure rate failed: ${error}`);
-        return { percentage: 0, failures: 0, total: 0, rating: "low", window: windowDays };
+        return {
+            percentage: 0,
+            failures: 0,
+            total: 0,
+            rating: "low",
+            window: windowDays,
+        };
     }
 }
 // ---------------------------------------------------------------------------
-// Lead Time to Change — time from first commit to merge
+// Lead Time to Change
 // ---------------------------------------------------------------------------
-async function computeLeadTimeToChange(token, windowDays) {
+async function computeLeadTimeToChange(token, windowDays, servicePaths) {
     try {
         const octokit = github.getOctokit(token);
         const { owner, repo } = github.context.repo;
@@ -30268,8 +30308,10 @@ async function computeLeadTimeToChange(token, windowDays) {
             direction: "desc",
             per_page: 50,
         });
-        const mergedInWindow = prs.filter((pr) => pr.merged_at &&
-            new Date(pr.merged_at).toISOString() >= since);
+        let mergedInWindow = prs.filter((pr) => pr.merged_at && new Date(pr.merged_at).toISOString() >= since);
+        if (servicePaths && servicePaths.length > 0) {
+            mergedInWindow = await filterPrsByServicePaths(octokit, owner, repo, mergedInWindow, servicePaths);
+        }
         if (mergedInWindow.length === 0) {
             return { medianHours: 0, rating: "elite", prCount: 0 };
         }
@@ -30284,8 +30326,7 @@ async function computeLeadTimeToChange(token, windowDays) {
                     per_page: 1,
                 });
                 if (commits.length > 0 && pr.merged_at) {
-                    const firstCommitDate = commits[0].commit.committer?.date ??
-                        commits[0].commit.author?.date;
+                    const firstCommitDate = commits[0].commit.committer?.date ?? commits[0].commit.author?.date;
                     if (firstCommitDate) {
                         const leadMs = new Date(pr.merged_at).getTime() - new Date(firstCommitDate).getTime();
                         leadTimesHours.push(Math.max(0, leadMs / (1000 * 60 * 60)));
@@ -30316,24 +30357,205 @@ async function computeLeadTimeToChange(token, windowDays) {
     }
 }
 // ---------------------------------------------------------------------------
-// Public API
+// Failed Deployment Recovery Time (FDRT) — new in DORA-5
 // ---------------------------------------------------------------------------
-async function computeDoraMetrics(token, windowDays = 30) {
-    const [deploymentFrequency, changeFailureRate, leadTimeToChange] = await Promise.all([
-        computeDeploymentFrequency(token, windowDays),
-        computeChangeFailureRate(token, windowDays),
-        computeLeadTimeToChange(token, windowDays),
+async function computeFailedDeployRecoveryTime(token, windowDays, environment) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+        const env = environment ?? "production";
+        const { data: deployments } = await octokit.request("GET /repos/{owner}/{repo}/deployments", { owner, repo, environment: env, per_page: 50 });
+        const deploymentsInWindow = deployments.filter((d) => new Date(d.created_at).toISOString() >= since);
+        if (deploymentsInWindow.length === 0) {
+            return { medianHours: 0, rating: "elite", incidentCount: 0 };
+        }
+        const recoveryTimesHours = [];
+        for (let i = 0; i < deploymentsInWindow.length; i++) {
+            const dep = deploymentsInWindow[i];
+            try {
+                const { data: statuses } = await octokit.request("GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses", { owner, repo, deployment_id: dep.id, per_page: 10 });
+                const hasFailure = statuses.some((s) => s.state === "failure" || s.state === "error");
+                if (hasFailure) {
+                    const failureTime = new Date(dep.created_at).getTime();
+                    let recoveryTime = null;
+                    for (let j = i - 1; j >= 0; j--) {
+                        const nextDep = deploymentsInWindow[j];
+                        const { data: nextStatuses } = await octokit.request("GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses", { owner, repo, deployment_id: nextDep.id, per_page: 10 });
+                        const succeeded = nextStatuses.some((s) => s.state === "success");
+                        if (succeeded) {
+                            recoveryTime = new Date(nextDep.created_at).getTime();
+                            break;
+                        }
+                    }
+                    if (recoveryTime !== null) {
+                        const hours = (recoveryTime - failureTime) / (1000 * 60 * 60);
+                        recoveryTimesHours.push(Math.max(0, hours));
+                    }
+                }
+            }
+            catch {
+                // skip deployments we can't fetch statuses for
+            }
+        }
+        if (recoveryTimesHours.length === 0) {
+            return { medianHours: 0, rating: "elite", incidentCount: 0 };
+        }
+        recoveryTimesHours.sort((a, b) => a - b);
+        const mid = Math.floor(recoveryTimesHours.length / 2);
+        const medianHours = recoveryTimesHours.length % 2 === 0
+            ? Math.round(((recoveryTimesHours[mid - 1] + recoveryTimesHours[mid]) / 2) * 10) /
+                10
+            : Math.round(recoveryTimesHours[mid] * 10) / 10;
+        return {
+            medianHours,
+            rating: rateFDRT(medianHours),
+            incidentCount: recoveryTimesHours.length,
+        };
+    }
+    catch (error) {
+        core.debug(`DORA FDRT failed: ${error}`);
+        return { medianHours: 0, rating: "low", incidentCount: 0 };
+    }
+}
+// ---------------------------------------------------------------------------
+// Change Rework Rate — new in DORA-5
+// ---------------------------------------------------------------------------
+async function computeChangeReworkRate(token, windowDays, servicePaths) {
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+        const { data: prs } = await octokit.rest.pulls.list({
+            owner,
+            repo,
+            state: "closed",
+            sort: "updated",
+            direction: "desc",
+            per_page: 100,
+        });
+        let mergedInWindow = prs.filter((pr) => pr.merged_at && new Date(pr.merged_at).toISOString() >= since);
+        if (servicePaths && servicePaths.length > 0) {
+            mergedInWindow = await filterPrsByServicePaths(octokit, owner, repo, mergedInWindow, servicePaths);
+        }
+        const total = mergedInWindow.length;
+        if (total < 2) {
+            return { percentage: 0, reworkPrs: 0, total, rating: "elite" };
+        }
+        const prFiles = new Map();
+        const sampleSize = Math.min(total, 30);
+        for (const pr of mergedInWindow.slice(0, sampleSize)) {
+            try {
+                const { data: files } = await octokit.rest.pulls.listFiles({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    per_page: 100,
+                });
+                prFiles.set(pr.number, new Set(files.map((f) => f.filename)));
+            }
+            catch {
+                // skip PRs we can't fetch files for
+            }
+        }
+        const REWORK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+        let reworkCount = 0;
+        const sortedPrs = mergedInWindow
+            .slice(0, sampleSize)
+            .sort((a, b) => new Date(a.merged_at ?? 0).getTime() - new Date(b.merged_at ?? 0).getTime());
+        for (let i = 1; i < sortedPrs.length; i++) {
+            const currentFiles = prFiles.get(sortedPrs[i].number);
+            if (!currentFiles || currentFiles.size === 0)
+                continue;
+            const currentMergedAt = new Date(sortedPrs[i].merged_at ?? 0).getTime();
+            for (let j = i - 1; j >= 0; j--) {
+                const prevMergedAt = new Date(sortedPrs[j].merged_at ?? 0).getTime();
+                if (currentMergedAt - prevMergedAt > REWORK_WINDOW_MS)
+                    break;
+                const prevFiles = prFiles.get(sortedPrs[j].number);
+                if (!prevFiles)
+                    continue;
+                const overlap = [...currentFiles].filter((f) => prevFiles.has(f));
+                if (overlap.length > 0) {
+                    reworkCount++;
+                    break;
+                }
+            }
+        }
+        const percentage = sampleSize > 0 ? Math.round((reworkCount / sampleSize) * 1000) / 10 : 0;
+        return {
+            percentage,
+            reworkPrs: reworkCount,
+            total: sampleSize,
+            rating: rateReworkRate(percentage),
+        };
+    }
+    catch (error) {
+        core.debug(`DORA rework rate failed: ${error}`);
+        return { percentage: 0, reworkPrs: 0, total: 0, rating: "low" };
+    }
+}
+async function filterPrsByServicePaths(octokit, owner, repo, prs, servicePaths) {
+    const pathPatterns = servicePaths.map((p) => {
+        const escaped = p
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*\*/g, "<<GLOBSTAR>>")
+            .replace(/\*/g, "[^/]*")
+            .replace(/<<GLOBSTAR>>/g, ".*");
+        return new RegExp(`^${escaped}$`, "i");
+    });
+    const filtered = [];
+    const sampleSize = Math.min(prs.length, 30);
+    for (const pr of prs.slice(0, sampleSize)) {
+        try {
+            const { data: files } = await octokit.rest.pulls.listFiles({
+                owner,
+                repo,
+                pull_number: pr.number,
+                per_page: 100,
+            });
+            const touchesService = files.some((f) => pathPatterns.some((p) => p.test(f.filename)));
+            if (touchesService) {
+                filtered.push(pr);
+            }
+        }
+        catch {
+            // skip PRs we can't fetch files for
+        }
+    }
+    return filtered;
+}
+async function computeDoraMetrics(token, windowDaysOrOptions = 30) {
+    const opts = typeof windowDaysOrOptions === "number"
+        ? { windowDays: windowDaysOrOptions }
+        : windowDaysOrOptions;
+    const windowDays = opts.windowDays ?? 30;
+    const environment = opts.environment;
+    const servicePaths = opts.servicePaths;
+    const [deploymentFrequency, changeFailureRate, leadTimeToChange, failedDeployRecoveryTime, changeReworkRate,] = await Promise.all([
+        computeDeploymentFrequency(token, windowDays, environment),
+        computeChangeFailureRate(token, windowDays, servicePaths),
+        computeLeadTimeToChange(token, windowDays, servicePaths),
+        computeFailedDeployRecoveryTime(token, windowDays, environment),
+        computeChangeReworkRate(token, windowDays, servicePaths),
     ]);
-    const partial = { deploymentFrequency, changeFailureRate, leadTimeToChange };
+    const partial = {
+        deploymentFrequency,
+        changeFailureRate,
+        leadTimeToChange,
+        failedDeployRecoveryTime,
+        changeReworkRate,
+    };
     return {
         ...partial,
         overallRating: overallDoraRating(partial),
+        environment,
+        service: servicePaths ? "filtered" : undefined,
     };
 }
 // ---------------------------------------------------------------------------
 // Human-readable labels (action outputs + dashboards)
 // ---------------------------------------------------------------------------
-/** Action output and CLI-friendly label; explains empty windows clearly */
 function formatDeploymentFrequencyForOutput(deploysPerWeek) {
     if (deploysPerWeek <= 0) {
         return "none in window (no successful default-branch deploy workflows in period)";
@@ -30368,22 +30590,31 @@ function shieldBadge(label, value, color) {
     const v = encodeURIComponent(value);
     return `![${label}](https://img.shields.io/badge/${l}-${v}-${color})`;
 }
+function formatHoursLabel(hours) {
+    if (hours >= 24) {
+        return `${Math.round((hours / 24) * 10) / 10} days`;
+    }
+    return `${hours} hours`;
+}
 function formatDoraReport(metrics) {
     const df = metrics.deploymentFrequency;
     const cfr = metrics.changeFailureRate;
     const lt = metrics.leadTimeToChange;
+    const fdrt = metrics.failedDeployRecoveryTime;
+    const rework = metrics.changeReworkRate;
     const dfLabel = formatDeploymentFrequencyCompact(df.deploysPerWeek);
     const dfTableLabel = formatDeploymentFrequencyForOutput(df.deploysPerWeek);
-    const ltLabel = lt.medianHours >= 24
-        ? `${Math.round((lt.medianHours / 24) * 10) / 10} days`
-        : `${lt.medianHours} hours`;
+    const ltLabel = formatHoursLabel(lt.medianHours);
+    const fdrtLabel = fdrt.incidentCount === 0 ? "n/a" : formatHoursLabel(fdrt.medianHours);
+    const envSuffix = metrics.environment ? ` — ${metrics.environment}` : "";
     const lines = [
-        `### DORA Metrics (${df.window}-day window)`,
+        `### DORA-5 Metrics (${df.window}-day window${envSuffix})`,
         ``,
         [
             shieldBadge("deploy frequency", dfLabel, RATING_COLORS[df.rating]),
             shieldBadge("change failure rate", `${cfr.percentage}%`, RATING_COLORS[cfr.rating]),
             shieldBadge("lead time", ltLabel, RATING_COLORS[lt.rating]),
+            shieldBadge("FDRT", fdrtLabel, RATING_COLORS[fdrt.rating]),
             shieldBadge("DORA rating", metrics.overallRating.toUpperCase(), RATING_COLORS[metrics.overallRating]),
         ].join(" "),
         ``,
@@ -30392,6 +30623,8 @@ function formatDoraReport(metrics) {
         `| Deployment Frequency | ${dfTableLabel} | ${df.rating.toUpperCase()} |`,
         `| Change Failure Rate | ${cfr.percentage}% (${cfr.failures}/${cfr.total}) | ${cfr.rating.toUpperCase()} |`,
         `| Lead Time to Change | ${ltLabel} (median, ${lt.prCount} PRs) | ${lt.rating.toUpperCase()} |`,
+        `| Failed Deploy Recovery | ${fdrtLabel}${fdrt.incidentCount > 0 ? ` (${fdrt.incidentCount} incident${fdrt.incidentCount === 1 ? "" : "s"})` : ""} | ${fdrt.rating.toUpperCase()} |`,
+        `| Change Rework Rate | ${rework.percentage}% (${rework.reworkPrs}/${rework.total}) | ${rework.rating.toUpperCase()} |`,
         `| **Overall** | | **${metrics.overallRating.toUpperCase()}** |`,
         ``,
     ];
@@ -30440,16 +30673,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.isSensitiveFile = isSensitiveFile;
+exports.decideGate = exports.isInFreezeWindow = exports.isRollback = exports.matchesGlobs = exports.isSensitiveFile = void 0;
 exports.sensitivityWeight = sensitivityWeight;
 exports.computeRiskScore = computeRiskScore;
-exports.isRollback = isRollback;
-exports.isInFreezeWindow = isInFreezeWindow;
 exports.checkHealth = checkHealth;
 exports.checkMcpHealth = checkMcpHealth;
 exports.checkVercelHealth = checkVercelHealth;
 exports.checkSupabaseHealth = checkSupabaseHealth;
-exports.decideGate = decideGate;
 exports.evaluateGate = evaluateGate;
 exports.postPrComment = postPrComment;
 exports.createCheckRun = createCheckRun;
@@ -30461,6 +30691,18 @@ const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const types_js_1 = __nccwpck_require__(8522);
 const config_js_1 = __nccwpck_require__(2973);
+const risk_engine_js_1 = __nccwpck_require__(1167);
+const security_js_1 = __nccwpck_require__(3725);
+var risk_engine_js_2 = __nccwpck_require__(1167);
+Object.defineProperty(exports, "isSensitiveFile", ({ enumerable: true, get: function () { return risk_engine_js_2.isSensitiveFile; } }));
+Object.defineProperty(exports, "matchesGlobs", ({ enumerable: true, get: function () { return risk_engine_js_2.matchesGlobs; } }));
+Object.defineProperty(exports, "isRollback", ({ enumerable: true, get: function () { return risk_engine_js_2.isRollback; } }));
+Object.defineProperty(exports, "isInFreezeWindow", ({ enumerable: true, get: function () { return risk_engine_js_2.isInFreezeWindow; } }));
+Object.defineProperty(exports, "decideGate", ({ enumerable: true, get: function () { return risk_engine_js_2.decideGate; } }));
+// Re-export sensitivityWeight with the RepoConfig-compatible signature
+function sensitivityWeight(filename, repoConfig) {
+    return (0, risk_engine_js_1.sensitivityWeight)(filename, repoConfig ?? null);
+}
 // ---------------------------------------------------------------------------
 // PR diff fetching via @actions/github
 // ---------------------------------------------------------------------------
@@ -30492,149 +30734,20 @@ async function fetchPrFiles(prNumber, token) {
     }
 }
 // ---------------------------------------------------------------------------
-// Risk scoring heuristics
+// Risk scoring — delegates to shared engine
 // ---------------------------------------------------------------------------
-const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/;
-const NON_SOURCE_PATTERN = /\.(sql|ya?ml|json|md|css|svg|lock|txt|env|png|jpg|gif)$/i;
-const SENSITIVE_PATTERNS = [
-    /(?:^|\/)migrations\//i,
-    /(?:^|\/)auth/i,
-    /(?:^|\/)security/i,
-    /(?:^|\/)payment/i,
-    /(?:^|\/)billing/i,
-    /(?:^|\/)webhook/i,
-    /(?:^|\/)infrastructure\//i,
-    /(?:^|\/)\.github\/workflows\//i,
-    /(?:^|\/)secrets/i,
-    /(?:^|\/)\.env/i,
-];
-const FACTOR_WEIGHTS = {
-    code_churn: 3,
-    test_coverage: 2,
-    file_count: 2,
-    sensitive_files: 3,
-    author_history: 1,
-    dependency_changes: 2,
-    pr_age: 1,
-};
-function isTestFile(filename) {
-    return TEST_FILE_PATTERN.test(filename);
-}
-function isNonSourceFile(filename) {
-    return NON_SOURCE_PATTERN.test(filename);
-}
-function isSensitiveFile(filename) {
-    return SENSITIVE_PATTERNS.some((p) => p.test(filename));
-}
-const HIGH_SENSITIVITY_PATTERN = /(?:^|\/)(?:auth|security|payment|billing|webhook)/i;
-const INFRA_SENSITIVITY_PATTERN = /(?:^|\/)(?:migrations|infrastructure|\.github\/workflows|secrets|\.env)/i;
-function sensitivityWeight(filename, repoConfig) {
-    if (repoConfig) {
-        if (repoConfig.ignore.length > 0 && (0, config_js_1.matchesGlobs)(filename, repoConfig.ignore))
-            return 0;
-        if (repoConfig.sensitivity.high.length > 0 &&
-            (0, config_js_1.matchesGlobs)(filename, repoConfig.sensitivity.high))
-            return 3;
-        if (repoConfig.sensitivity.medium.length > 0 &&
-            (0, config_js_1.matchesGlobs)(filename, repoConfig.sensitivity.medium))
-            return 2;
-        if (repoConfig.sensitivity.low.length > 0 &&
-            (0, config_js_1.matchesGlobs)(filename, repoConfig.sensitivity.low))
-            return 0.5;
-    }
-    if (isTestFile(filename))
-        return 0.3;
-    if (HIGH_SENSITIVITY_PATTERN.test(filename))
-        return 3;
-    if (INFRA_SENSITIVITY_PATTERN.test(filename))
-        return 2;
-    if (isNonSourceFile(filename))
-        return 0.5;
-    return 1;
-}
 function computeRiskScore(files, repoConfig) {
-    if (files.length === 0) {
-        return { score: 0, factors: [] };
-    }
-    const effectiveFiles = repoConfig?.ignore.length
-        ? files.filter((f) => !(0, config_js_1.matchesGlobs)(f.filename, repoConfig.ignore))
-        : files;
-    if (effectiveFiles.length === 0) {
-        return { score: 0, factors: [] };
-    }
-    const factors = [];
-    const customWeights = repoConfig?.weights ?? {};
-    const fileCount = effectiveFiles.length;
-    const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
-    factors.push({
-        type: "file_count",
-        score: fileCountScore,
-        detail: { fileCount, description: "Number of files changed" },
-    });
-    const totalChanges = effectiveFiles.reduce((sum, f) => sum + f.changes, 0);
-    const weightedChanges = effectiveFiles.reduce((sum, f) => sum + f.changes * sensitivityWeight(f.filename, repoConfig), 0);
-    const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + weightedChanges / 50)));
-    factors.push({
-        type: "code_churn",
-        score: churnScore,
-        detail: {
-            totalChanges,
-            weightedChanges: Math.round(weightedChanges),
-            description: "Sensitivity-weighted lines changed",
-        },
-    });
-    const testFileCount = effectiveFiles.filter((f) => isTestFile(f.filename)).length;
-    const nonSourceCount = effectiveFiles.filter((f) => !isTestFile(f.filename) && isNonSourceFile(f.filename)).length;
-    const sourceFileCount = effectiveFiles.length - testFileCount - nonSourceCount;
-    if (sourceFileCount > 0) {
-        const testRatio = testFileCount / sourceFileCount;
-        const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
-        factors.push({
-            type: "test_coverage",
-            score: testCoverageScore,
-            detail: {
-                testFiles: testFileCount,
-                sourceFiles: sourceFileCount,
-                nonSourceFiles: nonSourceCount,
-                testRatio: Math.round(testRatio * 100) / 100,
-            },
-        });
-    }
-    const sensitiveByConfig = repoConfig?.sensitivity.high.length
-        ? effectiveFiles.filter((f) => (0, config_js_1.matchesGlobs)(f.filename, repoConfig.sensitivity.high))
-        : [];
-    const sensitiveByDefault = effectiveFiles.filter((f) => isSensitiveFile(f.filename));
-    const sensitiveFilenames = new Set([
-        ...sensitiveByConfig.map((f) => f.filename),
-        ...sensitiveByDefault.map((f) => f.filename),
-    ]);
-    const sensitiveFiles = effectiveFiles.filter((f) => sensitiveFilenames.has(f.filename));
-    if (sensitiveFiles.length > 0) {
-        const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
-        factors.push({
-            type: "sensitive_files",
-            score: sensitiveScore,
-            detail: {
-                count: sensitiveFiles.length,
-                files: sensitiveFiles.map((f) => f.filename),
-                description: "High-risk files (migrations, auth, payments, CI)",
-            },
-        });
-    }
-    return { score: weightedAverageScores(factors, customWeights), factors };
-}
-function weightedAverageScores(factors, overrides) {
-    if (factors.length === 0)
-        return 0;
-    let totalWeight = 0;
-    let weightedSum = 0;
-    for (const f of factors) {
-        const w = overrides?.[f.type] ?? FACTOR_WEIGHTS[f.type] ?? 1;
-        weightedSum += f.score * w;
-        totalWeight += w;
-    }
-    const avg = Math.round(weightedSum / totalWeight);
-    return Math.min(100, Math.max(0, avg));
+    const fileInfos = files.map((f) => ({
+        filename: f.filename,
+        additions: f.additions,
+        deletions: f.deletions,
+        changes: f.changes,
+    }));
+    const result = (0, risk_engine_js_1.computeRiskScore)(fileInfos, repoConfig ?? null);
+    return {
+        score: result.score,
+        factors: result.factors,
+    };
 }
 // ---------------------------------------------------------------------------
 // Author history risk factor
@@ -30689,44 +30802,6 @@ async function computeAuthorHistory(prNumber, token) {
     }
 }
 // ---------------------------------------------------------------------------
-// Dependency change detection
-// ---------------------------------------------------------------------------
-const DEPENDENCY_FILES = [
-    /^package\.json$/,
-    /^package-lock\.json$/,
-    /^yarn\.lock$/,
-    /^pnpm-lock\.yaml$/,
-    /^requirements\.txt$/,
-    /^Pipfile\.lock$/,
-    /^poetry\.lock$/,
-    /^go\.mod$/,
-    /^go\.sum$/,
-    /^Gemfile\.lock$/,
-    /^Cargo\.lock$/,
-    /^composer\.lock$/,
-];
-function detectDependencyChanges(files) {
-    const depFiles = files.filter((f) => DEPENDENCY_FILES.some((p) => p.test(f.filename.replace(/.*\//, ""))));
-    if (depFiles.length === 0)
-        return null;
-    const hasLockfile = depFiles.some((f) => /\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename));
-    const hasManifest = depFiles.some((f) => !(/\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename)));
-    const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
-    const score = Math.min(100, (hasManifest && hasLockfile ? 40 : hasManifest ? 60 : 20) +
-        Math.min(30, Math.round(totalChanges / 100)));
-    return {
-        type: "dependency_changes",
-        score,
-        detail: {
-            files: depFiles.map((f) => f.filename),
-            hasManifest,
-            hasLockfile,
-            totalChanges,
-            description: "Dependencies added or updated",
-        },
-    };
-}
-// ---------------------------------------------------------------------------
 // PR age factor
 // ---------------------------------------------------------------------------
 async function computePrAge(prNumber, token) {
@@ -30762,38 +30837,6 @@ async function computePrAge(prNumber, token) {
     }
 }
 // ---------------------------------------------------------------------------
-// Rollback detection
-// ---------------------------------------------------------------------------
-function isRollback(prTitle) {
-    return /\brevert\b/i.test(prTitle) || /\brollback\b/i.test(prTitle);
-}
-// ---------------------------------------------------------------------------
-// Release freeze window check
-// ---------------------------------------------------------------------------
-const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-function isInFreezeWindow(freezes, now) {
-    if (freezes.length === 0)
-        return { frozen: false };
-    const d = now ?? new Date();
-    for (const freeze of freezes) {
-        const dayName = DAY_NAMES[d.getUTCDay()];
-        const matchesDay = freeze.days.length === 0 ||
-            freeze.days.some((fd) => fd.toLowerCase() === dayName);
-        if (!matchesDay)
-            continue;
-        const hour = d.getUTCHours();
-        const afterOk = freeze.afterHour === undefined || hour >= freeze.afterHour;
-        const beforeOk = freeze.beforeHour === undefined || hour < freeze.beforeHour;
-        if (afterOk && beforeOk) {
-            return {
-                frozen: true,
-                message: freeze.message ?? `Deployment frozen (${dayName} ${hour}:00 UTC)`,
-            };
-        }
-    }
-    return { frozen: false };
-}
-// ---------------------------------------------------------------------------
 // Health check (HTTP)
 // ---------------------------------------------------------------------------
 const HEALTH_CHECK_TIMEOUT_MS = 10_000;
@@ -30815,7 +30858,12 @@ async function checkHealth(url) {
         else {
             status = "block";
         }
-        return { target: url, status, latencyMs, detail: { httpStatus: response.status } };
+        return {
+            target: url,
+            status,
+            latencyMs,
+            detail: { httpStatus: response.status },
+        };
     }
     catch (error) {
         return {
@@ -30848,7 +30896,7 @@ async function checkMcpHealth() {
                 id: `dg-mcp-${Date.now()}`,
                 method: "tools/call",
                 params: {
-                    name: "health-check",
+                    name: "check-http-health",
                     arguments: {},
                 },
             }),
@@ -31004,17 +31052,6 @@ function aggregateHealthScore(checks) {
     return Math.round(total / checks.length);
 }
 // ---------------------------------------------------------------------------
-// Gate decision logic
-// ---------------------------------------------------------------------------
-function decideGate(riskScore, healthScore, blockThreshold, warnThreshold) {
-    const effectiveWarn = warnThreshold ?? blockThreshold - 15;
-    if (riskScore > blockThreshold)
-        return "block";
-    if (riskScore > effectiveWarn || healthScore < 50)
-        return "warn";
-    return "allow";
-}
-// ---------------------------------------------------------------------------
 // Remote gate API (enrichment layer, fail-open)
 // ---------------------------------------------------------------------------
 const API_TIMEOUT_MS = 15_000;
@@ -31057,9 +31094,14 @@ async function callGateApi(config, localEvaluation) {
 // ---------------------------------------------------------------------------
 async function evaluateGate(config, commitSha, prNumber) {
     const start = Date.now();
-    const [files, authorFactor, prAgeFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig,] = await Promise.all([
+    const isMergeQueue = github.context.eventName === "merge_group" ||
+        github.context.payload?.pull_request?.labels?.some((l) => l.name === "queue" || l.name.includes("merge-queue")) === true;
+    if (isMergeQueue) {
+        core.info("Merge queue detected — adjusting evaluation (skipping author_history)");
+    }
+    const [files, authorFactor, prAgeFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig, securityAlerts,] = await Promise.all([
         prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
-        prNumber && config.githubToken
+        prNumber && config.githubToken && !isMergeQueue
             ? computeAuthorHistory(prNumber, config.githubToken)
             : Promise.resolve(null),
         prNumber && config.githubToken
@@ -31072,10 +31114,16 @@ async function evaluateGate(config, commitSha, prNumber) {
         checkSupabaseHealth(),
         checkMcpHealth(),
         (0, config_js_1.loadRepoConfig)(config.githubToken),
+        config.securityGate !== false && config.githubToken
+            ? (0, security_js_1.fetchCodeScanningAlerts)(config.githubToken)
+            : Promise.resolve(null),
     ]);
-    const effectiveRiskThreshold = repoConfig?.thresholds.risk ?? config.riskThreshold;
-    const effectiveWarnThreshold = repoConfig?.thresholds.warn ?? config.warnThreshold;
-    const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
+    const envConfig = config.environment
+        ? repoConfig?.environments?.[config.environment]
+        : undefined;
+    const effectiveRiskThreshold = envConfig?.risk ?? repoConfig?.thresholds.risk ?? config.riskThreshold;
+    const effectiveWarnThreshold = envConfig?.warn ?? repoConfig?.thresholds.warn ?? config.warnThreshold;
+    const freezeCheck = (0, risk_engine_js_1.isInFreezeWindow)(repoConfig?.freeze ?? []);
     if (freezeCheck.frozen) {
         core.warning(`Release freeze active: ${freezeCheck.message}`);
     }
@@ -31084,12 +31132,17 @@ async function evaluateGate(config, commitSha, prNumber) {
         riskFactors.push(authorFactor);
     if (prAgeFactor)
         riskFactors.push(prAgeFactor);
-    const depFactor = detectDependencyChanges(files);
+    const depFactor = (0, risk_engine_js_1.detectDependencyChanges)(files);
     if (depFactor)
         riskFactors.push(depFactor);
+    if (securityAlerts && securityAlerts.total > 0) {
+        const secFactor = (0, security_js_1.computeSecurityRiskFactor)(securityAlerts, repoConfig?.security);
+        if (secFactor)
+            riskFactors.push(secFactor);
+    }
     const customWeights = repoConfig?.weights ?? {};
     const riskScore = riskFactors.length > 0
-        ? weightedAverageScores(riskFactors, customWeights)
+        ? (0, risk_engine_js_1.weightedAverageScores)(riskFactors, customWeights)
         : localRiskScore;
     const healthChecks = [...httpHealthChecks];
     if (vercelCheck)
@@ -31101,7 +31154,7 @@ async function evaluateGate(config, commitSha, prNumber) {
     const healthScore = aggregateHealthScore(healthChecks);
     const gateDecision = freezeCheck.frozen
         ? "block"
-        : decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
+        : (0, risk_engine_js_1.decideGate)(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
     const fileNames = files.map((f) => f.filename);
     let localEvaluation = {
         id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
@@ -31115,6 +31168,7 @@ async function evaluateGate(config, commitSha, prNumber) {
         riskFactors,
         files: fileNames.length > 0 ? fileNames : undefined,
         evaluationMs: Date.now() - start,
+        environment: config.environment,
     };
     if (config.apiKey) {
         const apiResponse = await callGateApi(config, localEvaluation);
@@ -31199,7 +31253,10 @@ async function createCheckRun(evaluation, report, token) {
 // PR risk labels
 // ---------------------------------------------------------------------------
 const RISK_LABELS = {
-    "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
+    "deployguard:low-risk": {
+        color: "0e8a16",
+        description: "DeployGuard: low risk score",
+    },
     "deployguard:medium-risk": {
         color: "fbca04",
         description: "DeployGuard: medium risk score",
@@ -31375,6 +31432,16 @@ function buildGuidance(evaluation) {
             lines.push(`- **Low test-to-source ratio**. Consider adding more tests for the changed source files.`);
         }
     }
+    if (factorTypes.has("security_alerts")) {
+        const secFactor = evaluation.riskFactors.find((f) => f.type === "security_alerts");
+        const secDetail = secFactor?.detail;
+        lines.push(`- **${secDetail?.total ?? "Open"} security alert(s)** found by code scanning. ` +
+            `Address critical and high severity findings before deploying.`);
+    }
+    if (factorTypes.has("deployment_history")) {
+        lines.push(`- **Recent deployment failures** detected. ` +
+            `Proceed with caution — the target environment has instability.`);
+    }
     const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
     const shouldSuggestSplit = (fileCountFactor && fileCountFactor.score >= 70) ||
         (churnFactor && churnFactor.score >= 70);
@@ -31407,10 +31474,14 @@ function buildGuidance(evaluation) {
 }
 function decisionIcon(decision) {
     switch (decision) {
-        case "allow": return "✅";
-        case "warn": return "⚠️";
-        case "block": return "🚫";
-        default: return "❓";
+        case "allow":
+            return "✅";
+        case "warn":
+            return "⚠️";
+        case "block":
+            return "🚫";
+        default:
+            return "❓";
     }
 }
 function riskBadge(score, threshold) {
@@ -31440,8 +31511,9 @@ function formatGateReport(evaluation, riskThreshold) {
     const healthDisplay = evaluation.healthChecks.length > 0
         ? `${evaluation.healthScore}/100`
         : "n/a (not configured)";
+    const envLabel = evaluation.environment ? ` (${evaluation.environment})` : "";
     const lines = [
-        `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}`,
+        `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}${envLabel}`,
         ``,
         riskBadge(evaluation.riskScore, threshold) +
             " " +
@@ -31482,7 +31554,7 @@ function formatGateReport(evaluation, riskThreshold) {
         lines.push(``, `</details>`, ``);
     }
     if (evaluation.files && evaluation.files.length > 0) {
-        const sensitiveSet = new Set(evaluation.files.filter((f) => isSensitiveFile(f)));
+        const sensitiveSet = new Set(evaluation.files.filter((f) => (0, risk_engine_js_1.isSensitiveFile)(f)));
         lines.push(`<details><summary>Files changed (${evaluation.files.length})</summary>`, ``);
         for (const file of evaluation.files) {
             const marker = sensitiveSet.has(file) ? " **⚠ sensitive**" : "";
@@ -31903,6 +31975,7 @@ const index_js_1 = __nccwpck_require__(9114);
 const jest_js_1 = __nccwpck_require__(526);
 const playwright_js_1 = __nccwpck_require__(183);
 const cypress_js_1 = __nccwpck_require__(3545);
+const security_js_1 = __nccwpck_require__(3725);
 function initHealers() {
     (0, index_js_1.registerHealer)(jest_js_1.jestHealer);
     (0, index_js_1.registerHealer)(playwright_js_1.playwrightHealer);
@@ -31987,6 +32060,8 @@ async function run() {
                 .map((s) => s.trim())
                 .filter(Boolean),
             evaluationStoreUrl: core.getInput("evaluation-store-url") || undefined,
+            environment: core.getInput("environment") || undefined,
+            securityGate: core.getInput("security-gate") !== "false",
         };
         const context = github.context;
         const commitSha = context.sha;
@@ -32001,18 +32076,42 @@ async function run() {
             core.setOutput("report-url", evaluation.reportUrl);
         }
         const report = (0, gate_js_1.formatGateReport)(evaluation, config.riskThreshold);
+        let securityReport = "";
+        if (config.securityGate !== false && config.githubToken) {
+            try {
+                const alerts = await (0, security_js_1.fetchCodeScanningAlerts)(config.githubToken);
+                if (alerts.total > 0) {
+                    core.setOutput("security-alerts-json", JSON.stringify(alerts));
+                    securityReport = (0, security_js_1.formatSecuritySection)(alerts);
+                }
+            }
+            catch (err) {
+                core.debug(`Security alerts fetch failed (non-blocking): ${err}`);
+            }
+        }
         let doraReport = "";
         const doraEnabled = core.getInput("dora-metrics") === "true";
         if (doraEnabled && config.githubToken) {
             try {
-                const doraMetrics = await (0, dora_js_1.computeDoraMetrics)(config.githubToken, 30);
+                const doraEnvironment = core.getInput("dora-environment") || config.environment || undefined;
+                const doraMetrics = await (0, dora_js_1.computeDoraMetrics)(config.githubToken, {
+                    windowDays: 30,
+                    environment: doraEnvironment,
+                });
                 const dfLabel = (0, dora_js_1.formatDeploymentFrequencyForOutput)(doraMetrics.deploymentFrequency.deploysPerWeek);
                 const ltLabel = doraMetrics.leadTimeToChange.medianHours >= 24
                     ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`
                     : `${doraMetrics.leadTimeToChange.medianHours} hours`;
+                const fdrtLabel = doraMetrics.failedDeployRecoveryTime.incidentCount === 0
+                    ? "n/a"
+                    : doraMetrics.failedDeployRecoveryTime.medianHours >= 24
+                        ? `${Math.round((doraMetrics.failedDeployRecoveryTime.medianHours / 24) * 10) / 10} days`
+                        : `${doraMetrics.failedDeployRecoveryTime.medianHours} hours`;
                 core.setOutput("dora-deployment-frequency", dfLabel);
                 core.setOutput("dora-change-failure-rate", `${doraMetrics.changeFailureRate.percentage}%`);
                 core.setOutput("dora-lead-time", ltLabel);
+                core.setOutput("dora-fdrt", fdrtLabel);
+                core.setOutput("dora-rework-rate", `${doraMetrics.changeReworkRate.percentage}%`);
                 core.setOutput("dora-rating", doraMetrics.overallRating.toUpperCase());
                 core.setOutput("dora-json", JSON.stringify(doraMetrics));
                 doraReport = (0, dora_js_1.formatDoraReport)(doraMetrics);
@@ -32031,7 +32130,12 @@ async function run() {
                 core.debug(`OTel export failed (non-blocking): ${err}`);
             }
         }
-        const fullReport = doraReport ? `${report}\n---\n\n${doraReport}` : report;
+        const reportParts = [report];
+        if (securityReport)
+            reportParts.push(securityReport);
+        if (doraReport)
+            reportParts.push(doraReport);
+        const fullReport = reportParts.join("\n---\n\n");
         await core.summary.addRaw(fullReport).write();
         if (config.githubToken) {
             if (prNumber) {
@@ -32453,13 +32557,544 @@ async function exportOtelSpan(evaluation, endpoint, headersStr) {
 
 /***/ }),
 
+/***/ 1167:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+// Pure risk scoring engine — no framework dependencies.
+// Shared across the GitHub Action, MCP server, and GitHub App.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FACTOR_WEIGHTS = exports.DEPENDENCY_FILES = exports.SENSITIVE_PATTERNS = exports.NON_SOURCE_PATTERN = exports.TEST_FILE_PATTERN = void 0;
+exports.matchesGlobs = matchesGlobs;
+exports.isTestFile = isTestFile;
+exports.isNonSourceFile = isNonSourceFile;
+exports.isSensitiveFile = isSensitiveFile;
+exports.sensitivityWeight = sensitivityWeight;
+exports.weightedAverageScores = weightedAverageScores;
+exports.computeRiskScore = computeRiskScore;
+exports.detectDependencyChanges = detectDependencyChanges;
+exports.computeSecurityFactor = computeSecurityFactor;
+exports.computeDeploymentHistoryFactor = computeDeploymentHistoryFactor;
+exports.isInFreezeWindow = isInFreezeWindow;
+exports.decideGate = decideGate;
+exports.isRollback = isRollback;
+// ---------------------------------------------------------------------------
+// Pattern constants
+// ---------------------------------------------------------------------------
+exports.TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/;
+exports.NON_SOURCE_PATTERN = /\.(sql|ya?ml|json|md|css|svg|lock|txt|env|png|jpg|gif)$/i;
+exports.SENSITIVE_PATTERNS = [
+    /(?:^|\/)migrations\//i,
+    /(?:^|\/)auth/i,
+    /(?:^|\/)security/i,
+    /(?:^|\/)payment/i,
+    /(?:^|\/)billing/i,
+    /(?:^|\/)webhook/i,
+    /(?:^|\/)infrastructure\//i,
+    /(?:^|\/)\.github\/workflows\//i,
+    /(?:^|\/)secrets/i,
+    /(?:^|\/)\.env/i,
+];
+const HIGH_SENSITIVITY_PATTERN = /(?:^|\/)(?:auth|security|payment|billing|webhook)/i;
+const INFRA_SENSITIVITY_PATTERN = /(?:^|\/)(?:migrations|infrastructure|\.github\/workflows|secrets|\.env)/i;
+exports.DEPENDENCY_FILES = [
+    /^package\.json$/,
+    /^package-lock\.json$/,
+    /^yarn\.lock$/,
+    /^pnpm-lock\.yaml$/,
+    /^requirements\.txt$/,
+    /^Pipfile\.lock$/,
+    /^poetry\.lock$/,
+    /^go\.mod$/,
+    /^go\.sum$/,
+    /^Gemfile\.lock$/,
+    /^Cargo\.lock$/,
+    /^composer\.lock$/,
+];
+// ---------------------------------------------------------------------------
+// Factor weights (v3: includes security_alerts, deployment_history, canary_status)
+// ---------------------------------------------------------------------------
+exports.FACTOR_WEIGHTS = {
+    code_churn: 3,
+    test_coverage: 2,
+    file_count: 2,
+    sensitive_files: 3,
+    author_history: 1,
+    dependency_changes: 2,
+    pr_age: 1,
+    security_alerts: 4,
+    deployment_history: 2,
+    canary_status: 2,
+};
+// ---------------------------------------------------------------------------
+// Glob matching
+// ---------------------------------------------------------------------------
+function globToRegex(pattern) {
+    const escaped = pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*\*/g, "<<GLOBSTAR>>")
+        .replace(/\*/g, "[^/]*")
+        .replace(/<<GLOBSTAR>>/g, ".*")
+        .replace(/\?/g, ".");
+    return new RegExp(`^${escaped}$`, "i");
+}
+function matchesGlobs(filename, patterns) {
+    return patterns.some((p) => globToRegex(p).test(filename));
+}
+// ---------------------------------------------------------------------------
+// File classification helpers
+// ---------------------------------------------------------------------------
+function isTestFile(filename) {
+    return exports.TEST_FILE_PATTERN.test(filename);
+}
+function isNonSourceFile(filename) {
+    return exports.NON_SOURCE_PATTERN.test(filename);
+}
+function isSensitiveFile(filename) {
+    return exports.SENSITIVE_PATTERNS.some((p) => p.test(filename));
+}
+function sensitivityWeight(filename, config) {
+    if (config) {
+        if (config.ignore?.length && matchesGlobs(filename, config.ignore))
+            return 0;
+        if (config.sensitivity?.high.length &&
+            matchesGlobs(filename, config.sensitivity.high))
+            return 3;
+        if (config.sensitivity?.medium.length &&
+            matchesGlobs(filename, config.sensitivity.medium))
+            return 2;
+        if (config.sensitivity?.low.length && matchesGlobs(filename, config.sensitivity.low))
+            return 0.5;
+    }
+    if (isTestFile(filename))
+        return 0.3;
+    if (HIGH_SENSITIVITY_PATTERN.test(filename))
+        return 3;
+    if (INFRA_SENSITIVITY_PATTERN.test(filename))
+        return 2;
+    if (isNonSourceFile(filename))
+        return 0.5;
+    return 1;
+}
+// ---------------------------------------------------------------------------
+// Weighted average
+// ---------------------------------------------------------------------------
+function weightedAverageScores(factors, overrides) {
+    if (factors.length === 0)
+        return 0;
+    let totalWeight = 0;
+    let weightedSum = 0;
+    for (const f of factors) {
+        const w = overrides?.[f.type] ?? exports.FACTOR_WEIGHTS[f.type] ?? 1;
+        weightedSum += f.score * w;
+        totalWeight += w;
+    }
+    const avg = Math.round(weightedSum / totalWeight);
+    return Math.min(100, Math.max(0, avg));
+}
+// ---------------------------------------------------------------------------
+// Risk scoring (pure — no API calls)
+// ---------------------------------------------------------------------------
+function computeRiskScore(files, config) {
+    if (files.length === 0) {
+        return { score: 0, factors: [] };
+    }
+    const ignorePatterns = config?.ignore ?? [];
+    const effectiveFiles = ignorePatterns.length > 0
+        ? files.filter((f) => !matchesGlobs(f.filename, ignorePatterns))
+        : files;
+    if (effectiveFiles.length === 0) {
+        return { score: 0, factors: [] };
+    }
+    const factors = [];
+    const customWeights = config?.weights ?? {};
+    const fileCount = effectiveFiles.length;
+    const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
+    factors.push({
+        type: "file_count",
+        score: fileCountScore,
+        detail: { fileCount, description: "Number of files changed" },
+    });
+    const totalChanges = effectiveFiles.reduce((sum, f) => sum + f.changes, 0);
+    const weightedChanges = effectiveFiles.reduce((sum, f) => sum + f.changes * sensitivityWeight(f.filename, config), 0);
+    const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + weightedChanges / 50)));
+    factors.push({
+        type: "code_churn",
+        score: churnScore,
+        detail: {
+            totalChanges,
+            weightedChanges: Math.round(weightedChanges),
+            description: "Sensitivity-weighted lines changed",
+        },
+    });
+    const testFileCount = effectiveFiles.filter((f) => isTestFile(f.filename)).length;
+    const nonSourceCount = effectiveFiles.filter((f) => !isTestFile(f.filename) && isNonSourceFile(f.filename)).length;
+    const sourceFileCount = effectiveFiles.length - testFileCount - nonSourceCount;
+    if (sourceFileCount > 0) {
+        const testRatio = testFileCount / sourceFileCount;
+        const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
+        factors.push({
+            type: "test_coverage",
+            score: testCoverageScore,
+            detail: {
+                testFiles: testFileCount,
+                sourceFiles: sourceFileCount,
+                nonSourceFiles: nonSourceCount,
+                testRatio: Math.round(testRatio * 100) / 100,
+            },
+        });
+    }
+    const highSensPatterns = config?.sensitivity?.high ?? [];
+    const sensitiveByConfig = highSensPatterns.length > 0
+        ? effectiveFiles.filter((f) => matchesGlobs(f.filename, highSensPatterns))
+        : [];
+    const sensitiveByDefault = effectiveFiles.filter((f) => isSensitiveFile(f.filename));
+    const sensitiveFilenames = new Set([
+        ...sensitiveByConfig.map((f) => f.filename),
+        ...sensitiveByDefault.map((f) => f.filename),
+    ]);
+    const sensitiveFiles = effectiveFiles.filter((f) => sensitiveFilenames.has(f.filename));
+    if (sensitiveFiles.length > 0) {
+        const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
+        factors.push({
+            type: "sensitive_files",
+            score: sensitiveScore,
+            detail: {
+                count: sensitiveFiles.length,
+                files: sensitiveFiles.map((f) => f.filename),
+                description: "High-risk files (migrations, auth, payments, CI)",
+            },
+        });
+    }
+    return { score: weightedAverageScores(factors, customWeights), factors };
+}
+// ---------------------------------------------------------------------------
+// Dependency change detection
+// ---------------------------------------------------------------------------
+function detectDependencyChanges(files) {
+    const depFiles = files.filter((f) => exports.DEPENDENCY_FILES.some((p) => p.test(f.filename.replace(/.*\//, ""))));
+    if (depFiles.length === 0)
+        return null;
+    const hasLockfile = depFiles.some((f) => /\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename));
+    const hasManifest = depFiles.some((f) => !/\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename));
+    const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
+    const score = Math.min(100, (hasManifest && hasLockfile ? 40 : hasManifest ? 60 : 20) +
+        Math.min(30, Math.round(totalChanges / 100)));
+    return {
+        type: "dependency_changes",
+        score,
+        detail: {
+            files: depFiles.map((f) => f.filename),
+            hasManifest,
+            hasLockfile,
+            totalChanges,
+            description: "Dependencies added or updated",
+        },
+    };
+}
+// ---------------------------------------------------------------------------
+// Security alerts risk factor (computed from pre-fetched alert counts)
+// ---------------------------------------------------------------------------
+function computeSecurityFactor(alerts) {
+    if (alerts.total === 0)
+        return null;
+    const score = Math.min(100, alerts.critical * 30 + alerts.high * 15 + alerts.medium * 5 + alerts.low * 1);
+    return {
+        type: "security_alerts",
+        score,
+        detail: {
+            critical: alerts.critical,
+            high: alerts.high,
+            medium: alerts.medium,
+            low: alerts.low,
+            total: alerts.total,
+            topRules: alerts.topRules,
+            description: `${alerts.total} open security alert(s)`,
+        },
+    };
+}
+// ---------------------------------------------------------------------------
+// Deployment history risk factor
+// ---------------------------------------------------------------------------
+function computeDeploymentHistoryFactor(outcomes) {
+    if (outcomes.recentTotal === 0)
+        return null;
+    let score = 0;
+    const reasons = [];
+    if (outcomes.recentFailures > 0) {
+        score += Math.min(40, outcomes.recentFailures * 20);
+        reasons.push(`${outcomes.recentFailures} recent failure(s)`);
+    }
+    if (outcomes.lastRollback) {
+        score += 30;
+        reasons.push("last deploy was rolled back");
+    }
+    if (outcomes.lastDeployFailed) {
+        score += 20;
+        reasons.push("last deploy failed");
+    }
+    score = Math.min(100, score);
+    if (score === 0)
+        return null;
+    return {
+        type: "deployment_history",
+        score,
+        detail: {
+            recentFailures: outcomes.recentFailures,
+            recentTotal: outcomes.recentTotal,
+            lastDeployFailed: outcomes.lastDeployFailed,
+            lastRollback: outcomes.lastRollback,
+            description: reasons.join("; "),
+        },
+    };
+}
+const DAY_NAMES = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+];
+function isInFreezeWindow(freezes, now) {
+    if (freezes.length === 0)
+        return { frozen: false };
+    const d = now ?? new Date();
+    for (const freeze of freezes) {
+        const dayName = DAY_NAMES[d.getUTCDay()];
+        const matchesDay = freeze.days.length === 0 || freeze.days.some((fd) => fd.toLowerCase() === dayName);
+        if (!matchesDay)
+            continue;
+        const hour = d.getUTCHours();
+        const afterOk = freeze.afterHour === undefined || hour >= freeze.afterHour;
+        const beforeOk = freeze.beforeHour === undefined || hour < freeze.beforeHour;
+        if (afterOk && beforeOk) {
+            return {
+                frozen: true,
+                message: freeze.message ?? `Deployment frozen (${dayName} ${hour}:00 UTC)`,
+            };
+        }
+    }
+    return { frozen: false };
+}
+function decideGate(riskScore, healthScore, blockThreshold, warnThreshold) {
+    const effectiveWarn = warnThreshold ?? blockThreshold - 15;
+    if (riskScore > blockThreshold)
+        return "block";
+    if (riskScore > effectiveWarn || healthScore < 50)
+        return "warn";
+    return "allow";
+}
+// ---------------------------------------------------------------------------
+// Rollback detection
+// ---------------------------------------------------------------------------
+function isRollback(prTitle) {
+    return /\brevert\b/i.test(prTitle) || /\brollback\b/i.test(prTitle);
+}
+
+
+/***/ }),
+
+/***/ 3725:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.fetchCodeScanningAlerts = fetchCodeScanningAlerts;
+exports.computeSecurityRiskFactor = computeSecurityRiskFactor;
+exports.formatSecuritySection = formatSecuritySection;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+const risk_engine_js_1 = __nccwpck_require__(1167);
+const SEVERITY_ORDER = {
+    critical: 0,
+    error: 1,
+    high: 1,
+    warning: 2,
+    medium: 2,
+    note: 3,
+    low: 3,
+};
+function normalizeSeverity(alert) {
+    const secLevel = alert.rule.security_severity_level;
+    if (secLevel && secLevel in SEVERITY_ORDER)
+        return secLevel;
+    const ruleSev = alert.rule.severity;
+    if (ruleSev && ruleSev in SEVERITY_ORDER)
+        return ruleSev;
+    return "medium";
+}
+function severityToBucket(severity) {
+    switch (severity) {
+        case "critical":
+            return "critical";
+        case "error":
+        case "high":
+            return "high";
+        case "warning":
+        case "medium":
+            return "medium";
+        case "note":
+        case "low":
+            return "low";
+        default:
+            return "medium";
+    }
+}
+// ---------------------------------------------------------------------------
+// Fetch alerts from GitHub Code Scanning API
+// ---------------------------------------------------------------------------
+async function fetchCodeScanningAlerts(token, config) {
+    const empty = {
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+        total: 0,
+        topRules: [],
+    };
+    try {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const { data: alerts } = (await octokit.request("GET /repos/{owner}/{repo}/code-scanning/alerts", {
+            owner,
+            repo,
+            state: "open",
+            per_page: 100,
+        }));
+        if (!alerts || alerts.length === 0)
+            return empty;
+        const threshold = config?.severity_threshold ?? "warning";
+        const thresholdOrder = SEVERITY_ORDER[threshold] ?? 2;
+        const ignoreRules = new Set(config?.ignore_rules ?? []);
+        const filtered = alerts.filter((a) => {
+            if (ignoreRules.has(a.rule.id))
+                return false;
+            const sev = normalizeSeverity(a);
+            return (SEVERITY_ORDER[sev] ?? 3) <= thresholdOrder;
+        });
+        const counts = {
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0,
+            total: filtered.length,
+            topRules: [],
+        };
+        const ruleCount = new Map();
+        for (const alert of filtered) {
+            const sev = normalizeSeverity(alert);
+            const bucket = severityToBucket(sev);
+            counts[bucket]++;
+            ruleCount.set(alert.rule.id, (ruleCount.get(alert.rule.id) ?? 0) + 1);
+        }
+        counts.topRules = [...ruleCount.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([ruleId, count]) => `${ruleId} (${count})`);
+        return counts;
+    }
+    catch (error) {
+        const msg = String(error);
+        if (msg.includes("403") || msg.includes("Advanced Security")) {
+            core.debug("Code Scanning API not available (requires GitHub Advanced Security)");
+        }
+        else if (!msg.includes("404")) {
+            core.debug(`Code Scanning fetch failed: ${msg}`);
+        }
+        return empty;
+    }
+}
+// ---------------------------------------------------------------------------
+// Compute the risk factor from alert counts
+// ---------------------------------------------------------------------------
+function computeSecurityRiskFactor(alerts, config) {
+    const factor = (0, risk_engine_js_1.computeSecurityFactor)(alerts);
+    if (!factor)
+        return null;
+    if (config?.block_on_critical && alerts.critical > 0) {
+        factor.score = Math.max(factor.score, 90);
+        factor.detail = {
+            ...factor.detail,
+            block_reason: `${alerts.critical} critical alert(s) — block_on_critical enabled`,
+        };
+    }
+    return factor;
+}
+// ---------------------------------------------------------------------------
+// Markdown section for report
+// ---------------------------------------------------------------------------
+function formatSecuritySection(alerts) {
+    if (alerts.total === 0)
+        return "";
+    const lines = [
+        `### Security Alerts`,
+        ``,
+        `| Severity | Count |`,
+        `|----------|-------|`,
+    ];
+    if (alerts.critical > 0)
+        lines.push(`| 🔴 Critical | ${alerts.critical} |`);
+    if (alerts.high > 0)
+        lines.push(`| 🟠 High | ${alerts.high} |`);
+    if (alerts.medium > 0)
+        lines.push(`| 🟡 Medium | ${alerts.medium} |`);
+    if (alerts.low > 0)
+        lines.push(`| 🔵 Low | ${alerts.low} |`);
+    lines.push(`| **Total** | **${alerts.total}** |`);
+    if (alerts.topRules && alerts.topRules.length > 0) {
+        lines.push(``, `**Top rules:** ${alerts.topRules.join(", ")}`);
+    }
+    lines.push(``);
+    return lines.join("\n");
+}
+
+
+/***/ }),
+
 /***/ 8522:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.RepoConfig = exports.FreezeWindow = exports.GateApiResponse = exports.GateEvaluation = exports.RiskFactor = exports.HealthCheckResult = exports.GateDecision = void 0;
+exports.RepoConfig = exports.CanaryConfig = exports.SecurityConfig = exports.ServiceMapping = exports.EnvironmentConfig = exports.FreezeWindow = exports.GateApiResponse = exports.GateEvaluation = exports.RiskFactor = exports.HealthCheckResult = exports.GateDecision = void 0;
 const zod_1 = __nccwpck_require__(924);
 exports.GateDecision = zod_1.z.enum(["allow", "warn", "block"]);
 exports.HealthCheckResult = zod_1.z.object({
@@ -32477,6 +33112,9 @@ exports.RiskFactor = zod_1.z.object({
         "author_history",
         "dependency_changes",
         "pr_age",
+        "security_alerts",
+        "deployment_history",
+        "canary_status",
     ]),
     score: zod_1.z.number().min(0).max(100),
     detail: zod_1.z.record(zod_1.z.unknown()).optional(),
@@ -32494,6 +33132,8 @@ exports.GateEvaluation = zod_1.z.object({
     files: zod_1.z.array(zod_1.z.string()).optional(),
     evaluationMs: zod_1.z.number(),
     reportUrl: zod_1.z.string().url().optional(),
+    environment: zod_1.z.string().optional(),
+    service: zod_1.z.string().optional(),
 });
 exports.GateApiResponse = zod_1.z.object({
     id: zod_1.z.string().optional(),
@@ -32510,6 +33150,25 @@ exports.FreezeWindow = zod_1.z.object({
     beforeHour: zod_1.z.number().min(0).max(23).optional(),
     timezone: zod_1.z.string().default("UTC"),
     message: zod_1.z.string().optional(),
+});
+exports.EnvironmentConfig = zod_1.z.object({
+    risk: zod_1.z.number().min(0).max(100).optional(),
+    warn: zod_1.z.number().min(0).max(100).optional(),
+    require_security_clear: zod_1.z.boolean().optional(),
+});
+exports.ServiceMapping = zod_1.z.object({
+    paths: zod_1.z.array(zod_1.z.string()),
+    environment: zod_1.z.string().optional(),
+});
+exports.SecurityConfig = zod_1.z.object({
+    severity_threshold: zod_1.z.enum(["error", "warning", "note", "none"]).default("warning"),
+    block_on_critical: zod_1.z.boolean().default(true),
+    ignore_rules: zod_1.z.array(zod_1.z.string()).default([]),
+});
+exports.CanaryConfig = zod_1.z.object({
+    webhook_type: zod_1.z.enum(["vercel", "generic"]).default("vercel"),
+    field_map: zod_1.z.record(zod_1.z.string()).optional(),
+    rollback_on_failure: zod_1.z.boolean().default(false),
 });
 exports.RepoConfig = zod_1.z.object({
     sensitivity: zod_1.z
@@ -32528,6 +33187,10 @@ exports.RepoConfig = zod_1.z.object({
         .default({}),
     ignore: zod_1.z.array(zod_1.z.string()).default([]),
     freeze: zod_1.z.array(exports.FreezeWindow).default([]),
+    environments: zod_1.z.record(exports.EnvironmentConfig).default({}),
+    services: zod_1.z.record(exports.ServiceMapping).default({}),
+    security: exports.SecurityConfig.default({}),
+    canary: exports.CanaryConfig.optional(),
 });
 
 

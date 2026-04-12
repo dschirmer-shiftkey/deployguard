@@ -29,6 +29,14 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/", "cli/dist/", "node_modules/", "coverage/", "scripts/", "mcp/", "app/"],
+    ignores: [
+      "dist/",
+      "cli/dist/",
+      "node_modules/",
+      "coverage/",
+      "scripts/",
+      "mcp/",
+      "app/",
+    ],
   },
 );

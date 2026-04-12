@@ -1,10 +1,11 @@
 {
   "name": "deployguard-app",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "description": "DeployGuard GitHub App — Deployment Protection Rule webhook handler",
   "scripts": {
+    "prebuild": "node -e \"require('fs').copyFileSync('../src/risk-engine.ts','src/risk-engine.ts')\"",
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts"

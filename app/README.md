@@ -15,14 +15,14 @@ or rejects deployments without any workflow YAML changes.
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GITHUB_APP_ID` | Yes | GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | Yes | PEM private key (newlines as `\n`) |
-| `GITHUB_WEBHOOK_SECRET` | No | Webhook secret for signature verification |
-| `RISK_THRESHOLD` | No | Block above this score (default: 70) |
-| `WARN_THRESHOLD` | No | Warn above this score (default: 55) |
-| `PORT` | No | Server port (default: 3000) |
+| Variable                 | Required | Description                               |
+| ------------------------ | -------- | ----------------------------------------- |
+| `GITHUB_APP_ID`          | Yes      | GitHub App ID                             |
+| `GITHUB_APP_PRIVATE_KEY` | Yes      | PEM private key (newlines as `\n`)        |
+| `GITHUB_WEBHOOK_SECRET`  | No       | Webhook secret for signature verification |
+| `RISK_THRESHOLD`         | No       | Block above this score (default: 70)      |
+| `WARN_THRESHOLD`         | No       | Warn above this score (default: 55)       |
+| `PORT`                   | No       | Server port (default: 3000)               |
 
 ### Deploy
 

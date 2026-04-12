@@ -19,6 +19,7 @@ import { registerHealer, attemptRepair } from "./healers/index.js";
 import { jestHealer } from "./healers/jest.js";
 import { playwrightHealer } from "./healers/playwright.js";
 import { cypressHealer } from "./healers/cypress.js";
+import { fetchCodeScanningAlerts, formatSecuritySection } from "./security.js";
 import type { DeployGuardConfig, TestRepairResult } from "./types.js";
 
 function initHealers(): void {
@@ -85,8 +86,7 @@ async function run(): Promise<void> {
 
     const config: DeployGuardConfig = {
       apiKey: core.getInput("api-key") || "",
-      apiUrl:
-        process.env.DEPLOYGUARD_API_URL || "",
+      apiUrl: process.env.DEPLOYGUARD_API_URL || "",
       githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
       healthCheckUrls: (core.getInput("health-check-urls") || "")
         .split(",")
@@ -112,6 +112,8 @@ async function run(): Promise<void> {
         .map((s) => s.trim())
         .filter(Boolean),
       evaluationStoreUrl: core.getInput("evaluation-store-url") || undefined,
+      environment: core.getInput("environment") || undefined,
+      securityGate: core.getInput("security-gate") !== "false",
     };
 
     const context = github.context;
@@ -132,23 +134,54 @@ async function run(): Promise<void> {
 
     const report = formatGateReport(evaluation, config.riskThreshold);
 
+    let securityReport = "";
+    if (config.securityGate !== false && config.githubToken) {
+      try {
+        const alerts = await fetchCodeScanningAlerts(config.githubToken);
+        if (alerts.total > 0) {
+          core.setOutput("security-alerts-json", JSON.stringify(alerts));
+          securityReport = formatSecuritySection(alerts);
+        }
+      } catch (err) {
+        core.debug(`Security alerts fetch failed (non-blocking): ${err}`);
+      }
+    }
+
     let doraReport = "";
     const doraEnabled = core.getInput("dora-metrics") === "true";
     if (doraEnabled && config.githubToken) {
       try {
-        const doraMetrics = await computeDoraMetrics(config.githubToken, 30);
+        const doraEnvironment =
+          core.getInput("dora-environment") || config.environment || undefined;
+        const doraMetrics = await computeDoraMetrics(config.githubToken, {
+          windowDays: 30,
+          environment: doraEnvironment,
+        });
 
         const dfLabel = formatDeploymentFrequencyForOutput(
           doraMetrics.deploymentFrequency.deploysPerWeek,
         );
 
-        const ltLabel = doraMetrics.leadTimeToChange.medianHours >= 24
-          ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`
-          : `${doraMetrics.leadTimeToChange.medianHours} hours`;
+        const ltLabel =
+          doraMetrics.leadTimeToChange.medianHours >= 24
+            ? `${Math.round((doraMetrics.leadTimeToChange.medianHours / 24) * 10) / 10} days`
+            : `${doraMetrics.leadTimeToChange.medianHours} hours`;
+
+        const fdrtLabel =
+          doraMetrics.failedDeployRecoveryTime.incidentCount === 0
+            ? "n/a"
+            : doraMetrics.failedDeployRecoveryTime.medianHours >= 24
+              ? `${Math.round((doraMetrics.failedDeployRecoveryTime.medianHours / 24) * 10) / 10} days`
+              : `${doraMetrics.failedDeployRecoveryTime.medianHours} hours`;
 
         core.setOutput("dora-deployment-frequency", dfLabel);
-        core.setOutput("dora-change-failure-rate", `${doraMetrics.changeFailureRate.percentage}%`);
+        core.setOutput(
+          "dora-change-failure-rate",
+          `${doraMetrics.changeFailureRate.percentage}%`,
+        );
         core.setOutput("dora-lead-time", ltLabel);
+        core.setOutput("dora-fdrt", fdrtLabel);
+        core.setOutput("dora-rework-rate", `${doraMetrics.changeReworkRate.percentage}%`);
         core.setOutput("dora-rating", doraMetrics.overallRating.toUpperCase());
         core.setOutput("dora-json", JSON.stringify(doraMetrics));
 
@@ -158,9 +191,11 @@ async function run(): Promise<void> {
       }
     }
 
-    const otelEndpoint = core.getInput("otel-endpoint") || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "";
+    const otelEndpoint =
+      core.getInput("otel-endpoint") || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "";
     if (otelEndpoint) {
-      const otelHeaders = core.getInput("otel-headers") || process.env.OTEL_EXPORTER_OTLP_HEADERS || "";
+      const otelHeaders =
+        core.getInput("otel-headers") || process.env.OTEL_EXPORTER_OTLP_HEADERS || "";
       try {
         await exportOtelSpan(evaluation, otelEndpoint, otelHeaders);
       } catch (err) {
@@ -168,7 +203,10 @@ async function run(): Promise<void> {
       }
     }
 
-    const fullReport = doraReport ? `${report}\n---\n\n${doraReport}` : report;
+    const reportParts = [report];
+    if (securityReport) reportParts.push(securityReport);
+    if (doraReport) reportParts.push(doraReport);
+    const fullReport = reportParts.join("\n---\n\n");
     await core.summary.addRaw(fullReport).write();
 
     if (config.githubToken) {

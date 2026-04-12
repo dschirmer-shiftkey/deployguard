@@ -3,7 +3,6 @@ import * as github from "@actions/github";
 import { GateApiResponse as GateApiResponseSchema } from "./types.js";
 import type {
   DeployGuardConfig,
-  FreezeWindow,
   GateApiResponse,
   GateDecision,
   GateEvaluation,
@@ -11,7 +10,35 @@ import type {
   RepoConfig,
   RiskFactor,
 } from "./types.js";
-import { loadRepoConfig, matchesGlobs } from "./config.js";
+import { loadRepoConfig } from "./config.js";
+import {
+  computeRiskScore as computeRiskScoreShared,
+  weightedAverageScores,
+  detectDependencyChanges,
+  decideGate,
+  isSensitiveFile,
+  sensitivityWeight as sensitivityWeightShared,
+  isInFreezeWindow,
+  type FileInfo,
+  type RiskFactorResult,
+} from "./risk-engine.js";
+import { fetchCodeScanningAlerts, computeSecurityRiskFactor } from "./security.js";
+
+export {
+  isSensitiveFile,
+  matchesGlobs,
+  isRollback,
+  isInFreezeWindow,
+  decideGate,
+} from "./risk-engine.js";
+
+// Re-export sensitivityWeight with the RepoConfig-compatible signature
+export function sensitivityWeight(
+  filename: string,
+  repoConfig?: RepoConfig | null,
+): number {
+  return sensitivityWeightShared(filename, repoConfig ?? null);
+}
 
 // ---------------------------------------------------------------------------
 // PR file metadata used for risk heuristics
@@ -61,80 +88,8 @@ async function fetchPrFiles(prNumber: number, token?: string): Promise<PrFileInf
 }
 
 // ---------------------------------------------------------------------------
-// Risk scoring heuristics
+// Risk scoring — delegates to shared engine
 // ---------------------------------------------------------------------------
-
-const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/;
-const NON_SOURCE_PATTERN = /\.(sql|ya?ml|json|md|css|svg|lock|txt|env|png|jpg|gif)$/i;
-const SENSITIVE_PATTERNS = [
-  /(?:^|\/)migrations\//i,
-  /(?:^|\/)auth/i,
-  /(?:^|\/)security/i,
-  /(?:^|\/)payment/i,
-  /(?:^|\/)billing/i,
-  /(?:^|\/)webhook/i,
-  /(?:^|\/)infrastructure\//i,
-  /(?:^|\/)\.github\/workflows\//i,
-  /(?:^|\/)secrets/i,
-  /(?:^|\/)\.env/i,
-];
-
-const FACTOR_WEIGHTS: Record<string, number> = {
-  code_churn: 3,
-  test_coverage: 2,
-  file_count: 2,
-  sensitive_files: 3,
-  author_history: 1,
-  dependency_changes: 2,
-  pr_age: 1,
-};
-
-function isTestFile(filename: string): boolean {
-  return TEST_FILE_PATTERN.test(filename);
-}
-
-function isNonSourceFile(filename: string): boolean {
-  return NON_SOURCE_PATTERN.test(filename);
-}
-
-export function isSensitiveFile(filename: string): boolean {
-  return SENSITIVE_PATTERNS.some((p) => p.test(filename));
-}
-
-const HIGH_SENSITIVITY_PATTERN = /(?:^|\/)(?:auth|security|payment|billing|webhook)/i;
-const INFRA_SENSITIVITY_PATTERN =
-  /(?:^|\/)(?:migrations|infrastructure|\.github\/workflows|secrets|\.env)/i;
-
-export function sensitivityWeight(
-  filename: string,
-  repoConfig?: RepoConfig | null,
-): number {
-  if (repoConfig) {
-    if (repoConfig.ignore.length > 0 && matchesGlobs(filename, repoConfig.ignore))
-      return 0;
-    if (
-      repoConfig.sensitivity.high.length > 0 &&
-      matchesGlobs(filename, repoConfig.sensitivity.high)
-    )
-      return 3;
-    if (
-      repoConfig.sensitivity.medium.length > 0 &&
-      matchesGlobs(filename, repoConfig.sensitivity.medium)
-    )
-      return 2;
-    if (
-      repoConfig.sensitivity.low.length > 0 &&
-      matchesGlobs(filename, repoConfig.sensitivity.low)
-    )
-      return 0.5;
-  }
-
-  if (isTestFile(filename)) return 0.3;
-  if (HIGH_SENSITIVITY_PATTERN.test(filename)) return 3;
-  if (INFRA_SENSITIVITY_PATTERN.test(filename)) return 2;
-  if (isNonSourceFile(filename)) return 0.5;
-  return 1;
-}
 
 export function computeRiskScore(
   files: PrFileInfo[],
@@ -143,106 +98,19 @@ export function computeRiskScore(
   score: number;
   factors: RiskFactor[];
 } {
-  if (files.length === 0) {
-    return { score: 0, factors: [] };
-  }
+  const fileInfos: FileInfo[] = files.map((f) => ({
+    filename: f.filename,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+  }));
 
-  const effectiveFiles = repoConfig?.ignore.length
-    ? files.filter((f) => !matchesGlobs(f.filename, repoConfig.ignore))
-    : files;
+  const result = computeRiskScoreShared(fileInfos, repoConfig ?? null);
 
-  if (effectiveFiles.length === 0) {
-    return { score: 0, factors: [] };
-  }
-
-  const factors: RiskFactor[] = [];
-
-  const customWeights = repoConfig?.weights ?? {};
-
-  const fileCount = effectiveFiles.length;
-  const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
-  factors.push({
-    type: "file_count",
-    score: fileCountScore,
-    detail: { fileCount, description: "Number of files changed" },
-  });
-
-  const totalChanges = effectiveFiles.reduce((sum, f) => sum + f.changes, 0);
-  const weightedChanges = effectiveFiles.reduce(
-    (sum, f) => sum + f.changes * sensitivityWeight(f.filename, repoConfig),
-    0,
-  );
-  const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + weightedChanges / 50)));
-  factors.push({
-    type: "code_churn",
-    score: churnScore,
-    detail: {
-      totalChanges,
-      weightedChanges: Math.round(weightedChanges),
-      description: "Sensitivity-weighted lines changed",
-    },
-  });
-
-  const testFileCount = effectiveFiles.filter((f) => isTestFile(f.filename)).length;
-  const nonSourceCount = effectiveFiles.filter(
-    (f) => !isTestFile(f.filename) && isNonSourceFile(f.filename),
-  ).length;
-  const sourceFileCount = effectiveFiles.length - testFileCount - nonSourceCount;
-  if (sourceFileCount > 0) {
-    const testRatio = testFileCount / sourceFileCount;
-    const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
-    factors.push({
-      type: "test_coverage",
-      score: testCoverageScore,
-      detail: {
-        testFiles: testFileCount,
-        sourceFiles: sourceFileCount,
-        nonSourceFiles: nonSourceCount,
-        testRatio: Math.round(testRatio * 100) / 100,
-      },
-    });
-  }
-
-  const sensitiveByConfig = repoConfig?.sensitivity.high.length
-    ? effectiveFiles.filter((f) => matchesGlobs(f.filename, repoConfig.sensitivity.high))
-    : [];
-  const sensitiveByDefault = effectiveFiles.filter((f) => isSensitiveFile(f.filename));
-  const sensitiveFilenames = new Set([
-    ...sensitiveByConfig.map((f) => f.filename),
-    ...sensitiveByDefault.map((f) => f.filename),
-  ]);
-  const sensitiveFiles = effectiveFiles.filter((f) => sensitiveFilenames.has(f.filename));
-
-  if (sensitiveFiles.length > 0) {
-    const sensitiveScore = Math.min(100, sensitiveFiles.length * 25);
-    factors.push({
-      type: "sensitive_files",
-      score: sensitiveScore,
-      detail: {
-        count: sensitiveFiles.length,
-        files: sensitiveFiles.map((f) => f.filename),
-        description: "High-risk files (migrations, auth, payments, CI)",
-      },
-    });
-  }
-
-  return { score: weightedAverageScores(factors, customWeights), factors };
-}
-
-function weightedAverageScores(
-  factors: RiskFactor[],
-  overrides?: Record<string, number>,
-): number {
-  if (factors.length === 0) return 0;
-  let totalWeight = 0;
-  let weightedSum = 0;
-  for (const f of factors) {
-    const w = overrides?.[f.type] ?? FACTOR_WEIGHTS[f.type] ?? 1;
-    weightedSum += f.score * w;
-    totalWeight += w;
-  }
-  const avg = Math.round(weightedSum / totalWeight);
-  return Math.min(100, Math.max(0, avg));
+  return {
+    score: result.score,
+    factors: result.factors as RiskFactor[],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,65 +174,10 @@ async function computeAuthorHistory(
 }
 
 // ---------------------------------------------------------------------------
-// Dependency change detection
-// ---------------------------------------------------------------------------
-
-const DEPENDENCY_FILES = [
-  /^package\.json$/,
-  /^package-lock\.json$/,
-  /^yarn\.lock$/,
-  /^pnpm-lock\.yaml$/,
-  /^requirements\.txt$/,
-  /^Pipfile\.lock$/,
-  /^poetry\.lock$/,
-  /^go\.mod$/,
-  /^go\.sum$/,
-  /^Gemfile\.lock$/,
-  /^Cargo\.lock$/,
-  /^composer\.lock$/,
-];
-
-function detectDependencyChanges(files: PrFileInfo[]): RiskFactor | null {
-  const depFiles = files.filter((f) =>
-    DEPENDENCY_FILES.some((p) => p.test(f.filename.replace(/.*\//, ""))),
-  );
-  if (depFiles.length === 0) return null;
-
-  const hasLockfile = depFiles.some((f) =>
-    /\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename),
-  );
-  const hasManifest = depFiles.some(
-    (f) => !(/\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename)),
-  );
-  const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
-
-  const score = Math.min(
-    100,
-    (hasManifest && hasLockfile ? 40 : hasManifest ? 60 : 20) +
-      Math.min(30, Math.round(totalChanges / 100)),
-  );
-
-  return {
-    type: "dependency_changes",
-    score,
-    detail: {
-      files: depFiles.map((f) => f.filename),
-      hasManifest,
-      hasLockfile,
-      totalChanges,
-      description: "Dependencies added or updated",
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // PR age factor
 // ---------------------------------------------------------------------------
 
-async function computePrAge(
-  prNumber: number,
-  token: string,
-): Promise<RiskFactor | null> {
+async function computePrAge(prNumber: number, token: string): Promise<RiskFactor | null> {
   try {
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
@@ -401,48 +214,6 @@ async function computePrAge(
 }
 
 // ---------------------------------------------------------------------------
-// Rollback detection
-// ---------------------------------------------------------------------------
-
-export function isRollback(prTitle: string): boolean {
-  return /\brevert\b/i.test(prTitle) || /\brollback\b/i.test(prTitle);
-}
-
-// ---------------------------------------------------------------------------
-// Release freeze window check
-// ---------------------------------------------------------------------------
-
-const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-
-export function isInFreezeWindow(freezes: FreezeWindow[], now?: Date): { frozen: boolean; message?: string } {
-  if (freezes.length === 0) return { frozen: false };
-
-  const d = now ?? new Date();
-
-  for (const freeze of freezes) {
-    const dayName = DAY_NAMES[d.getUTCDay()];
-    const matchesDay =
-      freeze.days.length === 0 ||
-      freeze.days.some((fd) => fd.toLowerCase() === dayName);
-
-    if (!matchesDay) continue;
-
-    const hour = d.getUTCHours();
-    const afterOk = freeze.afterHour === undefined || hour >= freeze.afterHour;
-    const beforeOk = freeze.beforeHour === undefined || hour < freeze.beforeHour;
-
-    if (afterOk && beforeOk) {
-      return {
-        frozen: true,
-        message: freeze.message ?? `Deployment frozen (${dayName} ${hour}:00 UTC)`,
-      };
-    }
-  }
-
-  return { frozen: false };
-}
-
-// ---------------------------------------------------------------------------
 // Health check (HTTP)
 // ---------------------------------------------------------------------------
 
@@ -466,7 +237,12 @@ export async function checkHealth(url: string): Promise<HealthCheckResult> {
       status = "block";
     }
 
-    return { target: url, status, latencyMs, detail: { httpStatus: response.status } };
+    return {
+      target: url,
+      status,
+      latencyMs,
+      detail: { httpStatus: response.status },
+    };
   } catch (error) {
     return {
       target: url,
@@ -501,7 +277,7 @@ export async function checkMcpHealth(): Promise<HealthCheckResult | null> {
         id: `dg-mcp-${Date.now()}`,
         method: "tools/call",
         params: {
-          name: "health-check",
+          name: "check-http-health",
           arguments: {},
         },
       }),
@@ -673,22 +449,6 @@ function aggregateHealthScore(checks: HealthCheckResult[]): number {
 }
 
 // ---------------------------------------------------------------------------
-// Gate decision logic
-// ---------------------------------------------------------------------------
-
-export function decideGate(
-  riskScore: number,
-  healthScore: number,
-  blockThreshold: number,
-  warnThreshold?: number,
-): GateDecision {
-  const effectiveWarn = warnThreshold ?? blockThreshold - 15;
-  if (riskScore > blockThreshold) return "block";
-  if (riskScore > effectiveWarn || healthScore < 50) return "warn";
-  return "allow";
-}
-
-// ---------------------------------------------------------------------------
 // Remote gate API (enrichment layer, fail-open)
 // ---------------------------------------------------------------------------
 
@@ -746,6 +506,16 @@ export async function evaluateGate(
 ): Promise<GateEvaluation> {
   const start = Date.now();
 
+  const isMergeQueue =
+    github.context.eventName === "merge_group" ||
+    (
+      github.context.payload?.pull_request?.labels as Array<{ name: string }> | undefined
+    )?.some((l) => l.name === "queue" || l.name.includes("merge-queue")) === true;
+
+  if (isMergeQueue) {
+    core.info("Merge queue detected — adjusting evaluation (skipping author_history)");
+  }
+
   const [
     files,
     authorFactor,
@@ -755,9 +525,10 @@ export async function evaluateGate(
     supabaseCheck,
     mcpCheck,
     repoConfig,
+    securityAlerts,
   ] = await Promise.all([
     prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
-    prNumber && config.githubToken
+    prNumber && config.githubToken && !isMergeQueue
       ? computeAuthorHistory(prNumber, config.githubToken)
       : Promise.resolve(null),
     prNumber && config.githubToken
@@ -770,10 +541,19 @@ export async function evaluateGate(
     checkSupabaseHealth(),
     checkMcpHealth(),
     loadRepoConfig(config.githubToken),
+    config.securityGate !== false && config.githubToken
+      ? fetchCodeScanningAlerts(config.githubToken)
+      : Promise.resolve(null),
   ]);
 
-  const effectiveRiskThreshold = repoConfig?.thresholds.risk ?? config.riskThreshold;
-  const effectiveWarnThreshold = repoConfig?.thresholds.warn ?? config.warnThreshold;
+  const envConfig = config.environment
+    ? repoConfig?.environments?.[config.environment]
+    : undefined;
+
+  const effectiveRiskThreshold =
+    envConfig?.risk ?? repoConfig?.thresholds.risk ?? config.riskThreshold;
+  const effectiveWarnThreshold =
+    envConfig?.warn ?? repoConfig?.thresholds.warn ?? config.warnThreshold;
 
   const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
   if (freezeCheck.frozen) {
@@ -788,13 +568,21 @@ export async function evaluateGate(
   if (authorFactor) riskFactors.push(authorFactor);
   if (prAgeFactor) riskFactors.push(prAgeFactor);
 
-  const depFactor = detectDependencyChanges(files);
+  const depFactor = detectDependencyChanges(files) as RiskFactor | null;
   if (depFactor) riskFactors.push(depFactor);
+
+  if (securityAlerts && securityAlerts.total > 0) {
+    const secFactor = computeSecurityRiskFactor(
+      securityAlerts,
+      repoConfig?.security,
+    ) as RiskFactor | null;
+    if (secFactor) riskFactors.push(secFactor);
+  }
 
   const customWeights = repoConfig?.weights ?? {};
   const riskScore =
     riskFactors.length > 0
-      ? weightedAverageScores(riskFactors, customWeights)
+      ? weightedAverageScores(riskFactors as RiskFactorResult[], customWeights)
       : localRiskScore;
 
   const healthChecks: HealthCheckResult[] = [...httpHealthChecks];
@@ -805,7 +593,12 @@ export async function evaluateGate(
   const healthScore = aggregateHealthScore(healthChecks);
   const gateDecision = freezeCheck.frozen
     ? ("block" as GateDecision)
-    : decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
+    : (decideGate(
+        riskScore,
+        healthScore,
+        effectiveRiskThreshold,
+        effectiveWarnThreshold,
+      ) as GateDecision);
 
   const fileNames = files.map((f) => f.filename);
 
@@ -821,6 +614,7 @@ export async function evaluateGate(
     riskFactors,
     files: fileNames.length > 0 ? fileNames : undefined,
     evaluationMs: Date.now() - start,
+    environment: config.environment,
   };
 
   if (config.apiKey) {
@@ -923,7 +717,10 @@ export async function createCheckRun(
 // ---------------------------------------------------------------------------
 
 const RISK_LABELS: Record<string, { color: string; description: string }> = {
-  "deployguard:low-risk": { color: "0e8a16", description: "DeployGuard: low risk score" },
+  "deployguard:low-risk": {
+    color: "0e8a16",
+    description: "DeployGuard: low risk score",
+  },
   "deployguard:medium-risk": {
     color: "fbca04",
     description: "DeployGuard: medium risk score",
@@ -1140,6 +937,22 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
     }
   }
 
+  if (factorTypes.has("security_alerts")) {
+    const secFactor = evaluation.riskFactors.find((f) => f.type === "security_alerts");
+    const secDetail = secFactor?.detail as { total?: number } | undefined;
+    lines.push(
+      `- **${secDetail?.total ?? "Open"} security alert(s)** found by code scanning. ` +
+        `Address critical and high severity findings before deploying.`,
+    );
+  }
+
+  if (factorTypes.has("deployment_history")) {
+    lines.push(
+      `- **Recent deployment failures** detected. ` +
+        `Proceed with caution — the target environment has instability.`,
+    );
+  }
+
   const fileCountFactor = evaluation.riskFactors.find((f) => f.type === "file_count");
   const shouldSuggestSplit =
     (fileCountFactor && fileCountFactor.score >= 70) ||
@@ -1188,15 +1001,20 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
 
 function decisionIcon(decision: GateDecision): string {
   switch (decision) {
-    case "allow": return "✅";
-    case "warn": return "⚠️";
-    case "block": return "🚫";
-    default: return "❓";
+    case "allow":
+      return "✅";
+    case "warn":
+      return "⚠️";
+    case "block":
+      return "🚫";
+    default:
+      return "❓";
   }
 }
 
 function riskBadge(score: number, threshold: number): string {
-  const color = score > threshold ? "red" : score > threshold - 15 ? "yellow" : "brightgreen";
+  const color =
+    score > threshold ? "red" : score > threshold - 15 ? "yellow" : "brightgreen";
   return `![Risk Score](https://img.shields.io/badge/risk-${score}%2F100-${color})`;
 }
 
@@ -1229,8 +1047,10 @@ export function formatGateReport(
       ? `${evaluation.healthScore}/100`
       : "n/a (not configured)";
 
+  const envLabel = evaluation.environment ? ` (${evaluation.environment})` : "";
+
   const lines: string[] = [
-    `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}`,
+    `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}${envLabel}`,
     ``,
     riskBadge(evaluation.riskScore, threshold) +
       " " +
@@ -1276,7 +1096,8 @@ export function formatGateReport(
       ``,
     );
     for (const check of evaluation.healthChecks) {
-      const icon = check.status === "allow" ? "🟢" : check.status === "warn" ? "🟡" : "🔴";
+      const icon =
+        check.status === "allow" ? "🟢" : check.status === "warn" ? "🟡" : "🔴";
       lines.push(
         `${icon} \`${check.target}\` — ${check.status.toUpperCase()} (${check.latencyMs}ms)`,
       );

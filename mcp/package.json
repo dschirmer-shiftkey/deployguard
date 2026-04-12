@@ -1,6 +1,6 @@
 {
   "name": "@deployguard/mcp-server",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "private": true,
   "description": "MCP server exposing DeployGuard health checks and risk scoring as tools",
   "type": "module",
@@ -9,6 +9,7 @@
     "deployguard-mcp": "dist/server.js"
   },
   "scripts": {
+    "prebuild": "node -e \"require('fs').copyFileSync('../src/risk-engine.ts','src/risk-engine.ts')\"",
     "build": "tsc",
     "start": "node dist/server.js"
   },

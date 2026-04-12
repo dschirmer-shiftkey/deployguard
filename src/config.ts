@@ -120,16 +120,4 @@ export async function loadRepoConfig(token?: string): Promise<RepoConfigType | n
   }
 }
 
-function globToRegex(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "<<GLOBSTAR>>")
-    .replace(/\*/g, "[^/]*")
-    .replace(/<<GLOBSTAR>>/g, ".*")
-    .replace(/\?/g, ".");
-  return new RegExp(`^${escaped}$`, "i");
-}
-
-export function matchesGlobs(filename: string, patterns: string[]): boolean {
-  return patterns.some((p) => globToRegex(p).test(filename));
-}
+export { matchesGlobs } from "./risk-engine.js";

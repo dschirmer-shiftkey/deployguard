@@ -1,5 +1,5 @@
 name: "DeployGuard"
-description: "Deployment gate for GitHub PRs — scores code risk, checks production health, and blocks dangerous releases."
+description: "Deployment gate for GitHub PRs — scores code risk, checks production health, integrates security signals, and blocks dangerous releases."
 author: "Komatik"
 
 branding:
@@ -56,9 +56,25 @@ inputs:
     required: false
     default: ""
   dora-metrics:
-    description: "Compute DORA metrics (deployment frequency, change failure rate, lead time) alongside the gate evaluation."
+    description: "Compute DORA-5 metrics (deployment frequency, change failure rate, lead time, FDRT, rework rate) alongside the gate evaluation."
     required: false
     default: "false"
+  dora-environment:
+    description: "Specific deployment environment to use for DORA metrics (e.g. 'production'). Uses Deployments API when set."
+    required: false
+    default: ""
+  environment:
+    description: "Target deployment environment. Used for per-environment threshold overrides from .deployguard.yml."
+    required: false
+    default: ""
+  security-gate:
+    description: "Enable GitHub Code Scanning alert integration as a risk factor. Set to 'false' to disable."
+    required: false
+    default: "true"
+  canary-webhook-secret:
+    description: "HMAC secret for verifying deploy outcome webhooks (Vercel/generic)."
+    required: false
+    default: ""
   otel-endpoint:
     description: "OTLP HTTP endpoint to export evaluation spans to (e.g. https://otel.example.com:4318/v1/traces). Omit to disable."
     required: false
@@ -89,10 +105,18 @@ outputs:
     description: "DORA change failure rate percentage (e.g. '8.3%'). Only set when dora-metrics is true."
   dora-lead-time:
     description: "DORA lead time to change (e.g. '2.1 hours'). Only set when dora-metrics is true."
+  dora-fdrt:
+    description: "DORA failed deployment recovery time. Only set when dora-metrics is true."
+  dora-rework-rate:
+    description: "DORA change rework rate percentage. Only set when dora-metrics is true."
   dora-rating:
-    description: "Overall DORA rating: Elite, High, Medium, or Low. Only set when dora-metrics is true."
+    description: "Overall DORA-5 rating: Elite, High, Medium, or Low. Only set when dora-metrics is true."
   dora-json:
-    description: "Full DORA metrics as JSON. Only set when dora-metrics is true."
+    description: "Full DORA-5 metrics as JSON. Only set when dora-metrics is true."
+  security-alerts-json:
+    description: "Code scanning alert summary as JSON. Only set when security-gate is enabled and alerts exist."
+  environment:
+    description: "The deployment environment used for this evaluation."
 
 runs:
   using: "node20"

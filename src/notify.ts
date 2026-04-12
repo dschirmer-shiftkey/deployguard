@@ -62,10 +62,7 @@ export async function sendWebhook(
   }
 }
 
-async function storeViaApi(
-  url: string,
-  evaluation: GateEvaluation,
-): Promise<boolean> {
+async function storeViaApi(url: string, evaluation: GateEvaluation): Promise<boolean> {
   const storeSecret = process.env.EVALUATION_STORE_SECRET;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -149,9 +146,7 @@ async function storeViaSupabase(evaluation: GateEvaluation): Promise<boolean> {
   }
 
   const body = await response.text().catch(() => "");
-  core.warning(
-    `Supabase direct insert failed (HTTP ${response.status}): ${body}`,
-  );
+  core.warning(`Supabase direct insert failed (HTTP ${response.status}): ${body}`);
   return false;
 }
 

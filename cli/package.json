@@ -1,6 +1,6 @@
 {
   "name": "deployguard",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "DeployGuard CLI — setup wizard and utilities for the DeployGuard deployment gate",
   "type": "module",
   "bin": {

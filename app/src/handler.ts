@@ -1,5 +1,6 @@
 import { createAppAuth } from "@octokit/auth-app";
 import crypto from "node:crypto";
+import { computeRiskScore, decideGate, type FileInfo } from "./risk-engine.js";
 
 // ---------------------------------------------------------------------------
 // Configuration from environment
@@ -19,17 +20,25 @@ function getConfig() {
 // Webhook signature verification
 // ---------------------------------------------------------------------------
 
-function verifySignature(payload: string, signature: string, secret: string): boolean {
+export function verifySignature(
+  payload: string,
+  signature: string,
+  secret: string,
+): boolean {
   if (!secret || !signature) return !secret;
   const expected = `sha256=${crypto
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex")}`;
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Lightweight risk scoring (mirrors core engine logic for standalone use)
+// Types
 // ---------------------------------------------------------------------------
 
 interface DeploymentProtectionPayload {
@@ -57,6 +66,10 @@ interface PullRequest {
   deletions: number;
   user: { login: string };
 }
+
+// ---------------------------------------------------------------------------
+// GitHub API helpers
+// ---------------------------------------------------------------------------
 
 async function findPrForSha(
   token: string,
@@ -88,7 +101,7 @@ async function fetchChangedFiles(
   owner: string,
   repo: string,
   prNumber: number,
-): Promise<Array<{ filename: string; changes: number }>> {
+): Promise<FileInfo[]> {
   try {
     const res = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=300`,
@@ -101,56 +114,39 @@ async function fetchChangedFiles(
       },
     );
     if (!res.ok) return [];
-    return (await res.json()) as Array<{ filename: string; changes: number }>;
+    return (await res.json()) as FileInfo[];
   } catch {
     return [];
   }
 }
 
-const SENSITIVE = [
-  /migrations?\//i,
-  /auth/i,
-  /payment/i,
-  /billing/i,
-  /\.github\/workflows/i,
-  /secrets/i,
-  /\.env/i,
-];
-
-function computeQuickRisk(
-  files: Array<{ filename: string; changes: number }>,
-  pr: PullRequest | null,
-): { score: number; summary: string } {
-  if (files.length === 0 && !pr) {
-    return { score: 0, summary: "No PR data available — low risk assumed." };
+async function fetchRepoConfig(
+  token: string,
+  owner: string,
+  repo: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/.deployguard.yml`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      content?: string;
+      type?: string;
+    };
+    if (data.type !== "file" || !data.content) return null;
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return null;
   }
-
-  let score = 0;
-  const reasons: string[] = [];
-
-  const totalChanges = files.reduce((s, f) => s + f.changes, 0);
-  const churnScore = Math.min(40, Math.round(10 * Math.log2(1 + totalChanges / 50)));
-  score += churnScore;
-  if (churnScore > 20) reasons.push(`High code churn (${totalChanges} lines)`);
-
-  const fileCountScore = Math.min(30, Math.round(10 * Math.log2(1 + files.length)));
-  score += fileCountScore;
-  if (files.length > 15) reasons.push(`${files.length} files changed`);
-
-  const sensitiveFiles = files.filter((f) => SENSITIVE.some((p) => p.test(f.filename)));
-  if (sensitiveFiles.length > 0) {
-    const sensitiveScore = Math.min(30, sensitiveFiles.length * 10);
-    score += sensitiveScore;
-    reasons.push(`${sensitiveFiles.length} sensitive file(s) touched`);
-  }
-
-  score = Math.min(100, score);
-  const summary =
-    reasons.length > 0
-      ? reasons.join("; ")
-      : `Low risk (${files.length} files, ${totalChanges} lines)`;
-
-  return { score, summary };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +155,17 @@ function computeQuickRisk(
 
 export async function handleDeploymentProtectionRule(
   payload: DeploymentProtectionPayload,
-  _signature: string,
+  rawBody: string,
+  signature: string,
 ): Promise<void> {
   const config = getConfig();
+
+  if (config.webhookSecret) {
+    if (!verifySignature(rawBody, signature, config.webhookSecret)) {
+      throw new Error("Invalid webhook signature");
+    }
+  }
+
   const [owner, repo] = payload.repository.full_name.split("/");
 
   const auth = createAppAuth({
@@ -172,12 +176,31 @@ export async function handleDeploymentProtectionRule(
 
   const { token } = await auth({ type: "installation" });
 
-  const pr = await findPrForSha(token, owner, repo, payload.deployment.sha);
-  const files = pr
-    ? await fetchChangedFiles(token, owner, repo, pr.number)
-    : [];
+  const [pr, repoConfigRaw] = await Promise.all([
+    findPrForSha(token, owner, repo, payload.deployment.sha),
+    fetchRepoConfig(token, owner, repo),
+  ]);
 
-  const { score, summary } = computeQuickRisk(files, pr);
+  const files = pr ? await fetchChangedFiles(token, owner, repo, pr.number) : [];
+
+  const envConfig = repoConfigRaw?.environments as
+    | Record<string, { risk?: number; warn?: number }>
+    | undefined;
+  const envOverrides = envConfig?.[payload.environment];
+  const effectiveRiskThreshold = envOverrides?.risk ?? config.riskThreshold;
+  const effectiveWarnThreshold = envOverrides?.warn ?? config.warnThreshold;
+
+  const { score, factors } = computeRiskScore(files);
+  const decision = decideGate(score, 100, effectiveRiskThreshold, effectiveWarnThreshold);
+
+  const factorSummary =
+    factors.length > 0
+      ? factors
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .map((f) => `${f.type.replace(/_/g, " ")}: ${f.score}/100`)
+          .join(", ")
+      : "No risk factors";
 
   const prRef = pr ? `PR #${pr.number}` : payload.deployment.sha.substring(0, 7);
   const envName = payload.environment;
@@ -185,24 +208,24 @@ export async function handleDeploymentProtectionRule(
   let state: "approved" | "rejected";
   let comment: string;
 
-  if (score > config.riskThreshold) {
+  if (decision === "block") {
     state = "rejected";
     comment =
       `**DeployGuard: BLOCKED** deployment to \`${envName}\`\n\n` +
-      `Risk score **${score}/100** exceeds threshold (${config.riskThreshold}) for ${prRef}.\n\n` +
-      `**Reason:** ${summary}\n\n` +
+      `Risk score **${score}/100** exceeds threshold (${effectiveRiskThreshold}) for ${prRef}.\n\n` +
+      `**Top factors:** ${factorSummary}\n\n` +
       `> Review the changes and reduce risk before deploying.`;
-  } else if (score > config.warnThreshold) {
+  } else if (decision === "warn") {
     state = "approved";
     comment =
       `**DeployGuard: WARNING** — approving deployment to \`${envName}\` with elevated risk.\n\n` +
-      `Risk score **${score}/100** (warn threshold: ${config.warnThreshold}) for ${prRef}.\n\n` +
-      `**Note:** ${summary}`;
+      `Risk score **${score}/100** (warn threshold: ${effectiveWarnThreshold}) for ${prRef}.\n\n` +
+      `**Top factors:** ${factorSummary}`;
   } else {
     state = "approved";
     comment =
       `**DeployGuard: APPROVED** deployment to \`${envName}\`\n\n` +
-      `Risk score **${score}/100** for ${prRef}. ${summary}`;
+      `Risk score **${score}/100** for ${prRef}. ${factorSummary}`;
   }
 
   const callbackUrl = payload.deployment_callback_url;
@@ -223,6 +246,6 @@ export async function handleDeploymentProtectionRule(
   });
 
   console.log(
-    `[DeployGuard] ${state.toUpperCase()} ${envName} — ${prRef} risk=${score} (threshold=${config.riskThreshold})`,
+    `[DeployGuard] ${state.toUpperCase()} ${envName} — ${prRef} risk=${score} (threshold=${effectiveRiskThreshold})`,
   );
 }

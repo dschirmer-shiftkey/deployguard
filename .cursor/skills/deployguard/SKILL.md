@@ -32,16 +32,16 @@ description: Load DeployGuard product context for the deployment gate — Action
 
 ## Architecture snapshot
 
-| Area | Location |
-| ---- | -------- |
-| Gate + risk + health | `src/gate.ts` |
-| DORA | `src/dora.ts` (`formatDeploymentFrequencyForOutput`, `formatDoraReport`) |
-| OTel | `src/otel.ts` |
-| Store + webhook | `src/notify.ts` (HTTP store, `VERCEL_AUTOMATION_BYPASS_SECRET`, Supabase REST fallback) |
-| CLI wizard | `cli/src/index.ts` |
-| Deploy protection app | `app/src/` |
-| MCP server | `mcp/src/server.ts` |
-| Examples | `examples/github-actions/` |
+| Area                  | Location                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| Gate + risk + health  | `src/gate.ts`                                                                           |
+| DORA                  | `src/dora.ts` (`formatDeploymentFrequencyForOutput`, `formatDoraReport`)                |
+| OTel                  | `src/otel.ts`                                                                           |
+| Store + webhook       | `src/notify.ts` (HTTP store, `VERCEL_AUTOMATION_BYPASS_SECRET`, Supabase REST fallback) |
+| CLI wizard            | `cli/src/index.ts`                                                                      |
+| Deploy protection app | `app/src/`                                                                              |
+| MCP server            | `mcp/src/server.ts`                                                                     |
+| Examples              | `examples/github-actions/`                                                              |
 
 ## One-liner
 

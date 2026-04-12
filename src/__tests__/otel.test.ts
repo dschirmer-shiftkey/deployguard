@@ -63,16 +63,24 @@ describe("exportOtelSpan", () => {
   });
 
   it("includes risk score and decision as span attributes", async () => {
-    await exportOtelSpan(makeEvaluation({ riskScore: 72, gateDecision: "block" }), "https://otel.example.com:4318", "");
+    await exportOtelSpan(
+      makeEvaluation({ riskScore: 72, gateDecision: "block" }),
+      "https://otel.example.com:4318",
+      "",
+    );
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     const attrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
 
-    const riskAttr = attrs.find((a: { key: string }) => a.key === "deployguard.risk_score");
+    const riskAttr = attrs.find(
+      (a: { key: string }) => a.key === "deployguard.risk_score",
+    );
     expect(riskAttr).toBeDefined();
     expect(riskAttr.value.intValue).toBe("72");
 
-    const decisionAttr = attrs.find((a: { key: string }) => a.key === "deployguard.decision");
+    const decisionAttr = attrs.find(
+      (a: { key: string }) => a.key === "deployguard.decision",
+    );
     expect(decisionAttr).toBeDefined();
     expect(decisionAttr.value.stringValue).toBe("block");
   });
@@ -83,7 +91,9 @@ describe("exportOtelSpan", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     const attrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
 
-    const churnAttr = attrs.find((a: { key: string }) => a.key === "deployguard.factor.code_churn");
+    const churnAttr = attrs.find(
+      (a: { key: string }) => a.key === "deployguard.factor.code_churn",
+    );
     expect(churnAttr).toBeDefined();
     expect(churnAttr.value.intValue).toBe("25");
   });
@@ -107,7 +117,11 @@ describe("exportOtelSpan", () => {
   });
 
   it("sets span status code 2 for blocked evaluations", async () => {
-    await exportOtelSpan(makeEvaluation({ gateDecision: "block" }), "https://otel.example.com:4318", "");
+    await exportOtelSpan(
+      makeEvaluation({ gateDecision: "block" }),
+      "https://otel.example.com:4318",
+      "",
+    );
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     const span = body.resourceSpans[0].scopeSpans[0].spans[0];
@@ -115,7 +129,11 @@ describe("exportOtelSpan", () => {
   });
 
   it("sets span status code 1 for allowed evaluations", async () => {
-    await exportOtelSpan(makeEvaluation({ gateDecision: "allow" }), "https://otel.example.com:4318", "");
+    await exportOtelSpan(
+      makeEvaluation({ gateDecision: "allow" }),
+      "https://otel.example.com:4318",
+      "",
+    );
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     const span = body.resourceSpans[0].scopeSpans[0].spans[0];
@@ -136,7 +154,9 @@ describe("exportOtelSpan", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     const resourceAttrs = body.resourceSpans[0].resource.attributes;
 
-    const serviceName = resourceAttrs.find((a: { key: string }) => a.key === "service.name");
+    const serviceName = resourceAttrs.find(
+      (a: { key: string }) => a.key === "service.name",
+    );
     expect(serviceName.value.stringValue).toBe("deployguard");
   });
 });

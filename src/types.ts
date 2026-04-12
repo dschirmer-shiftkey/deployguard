@@ -20,6 +20,9 @@ export const RiskFactor = z.object({
     "author_history",
     "dependency_changes",
     "pr_age",
+    "security_alerts",
+    "deployment_history",
+    "canary_status",
   ]),
   score: z.number().min(0).max(100),
   detail: z.record(z.unknown()).optional(),
@@ -39,6 +42,8 @@ export const GateEvaluation = z.object({
   files: z.array(z.string()).optional(),
   evaluationMs: z.number(),
   reportUrl: z.string().url().optional(),
+  environment: z.string().optional(),
+  service: z.string().optional(),
 });
 export type GateEvaluation = z.infer<typeof GateEvaluation>;
 
@@ -62,6 +67,33 @@ export const FreezeWindow = z.object({
 });
 export type FreezeWindow = z.infer<typeof FreezeWindow>;
 
+export const EnvironmentConfig = z.object({
+  risk: z.number().min(0).max(100).optional(),
+  warn: z.number().min(0).max(100).optional(),
+  require_security_clear: z.boolean().optional(),
+});
+export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
+
+export const ServiceMapping = z.object({
+  paths: z.array(z.string()),
+  environment: z.string().optional(),
+});
+export type ServiceMapping = z.infer<typeof ServiceMapping>;
+
+export const SecurityConfig = z.object({
+  severity_threshold: z.enum(["error", "warning", "note", "none"]).default("warning"),
+  block_on_critical: z.boolean().default(true),
+  ignore_rules: z.array(z.string()).default([]),
+});
+export type SecurityConfig = z.infer<typeof SecurityConfig>;
+
+export const CanaryConfig = z.object({
+  webhook_type: z.enum(["vercel", "generic"]).default("vercel"),
+  field_map: z.record(z.string()).optional(),
+  rollback_on_failure: z.boolean().default(false),
+});
+export type CanaryConfig = z.infer<typeof CanaryConfig>;
+
 export const RepoConfig = z.object({
   sensitivity: z
     .object({
@@ -79,6 +111,10 @@ export const RepoConfig = z.object({
     .default({}),
   ignore: z.array(z.string()).default([]),
   freeze: z.array(FreezeWindow).default([]),
+  environments: z.record(EnvironmentConfig).default({}),
+  services: z.record(ServiceMapping).default({}),
+  security: SecurityConfig.default({}),
+  canary: CanaryConfig.optional(),
 });
 export type RepoConfig = z.infer<typeof RepoConfig>;
 
@@ -96,6 +132,8 @@ export interface DeployGuardConfig {
   webhookUrl?: string;
   webhookEvents: string[];
   evaluationStoreUrl?: string;
+  environment?: string;
+  securityGate?: boolean;
 }
 
 export interface TestRepairResult {

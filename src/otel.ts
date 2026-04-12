@@ -25,7 +25,12 @@ function generateId(bytes: number): string {
 
 interface OtelAttribute {
   key: string;
-  value: { stringValue?: string; intValue?: string; doubleValue?: number; boolValue?: boolean };
+  value: {
+    stringValue?: string;
+    intValue?: string;
+    doubleValue?: number;
+    boolValue?: boolean;
+  };
 }
 
 function strAttr(key: string, value: string): OtelAttribute {
@@ -46,7 +51,9 @@ export async function exportOtelSpan(
   headersStr: string,
 ): Promise<void> {
   const now = hrTimeNano();
-  const startNano = (BigInt(Date.now() - evaluation.evaluationMs) * 1_000_000n).toString();
+  const startNano = (
+    BigInt(Date.now() - evaluation.evaluationMs) * 1_000_000n
+  ).toString();
 
   const { owner, repo } = github.context.repo;
 

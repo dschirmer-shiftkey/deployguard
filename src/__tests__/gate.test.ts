@@ -606,9 +606,7 @@ describe("formatGateReport", () => {
       reportUrl: "https://example.com/reports/abc",
     };
     const report = formatGateReport(evaluation);
-    expect(report).toContain(
-      "[View full report](https://example.com/reports/abc)",
-    );
+    expect(report).toContain("[View full report](https://example.com/reports/abc)");
   });
 
   it("omits sections that have no data", () => {
@@ -1301,7 +1299,14 @@ describe("isInFreezeWindow", () => {
   it("includes custom message when frozen", () => {
     const friday3pm = new Date("2026-04-10T15:00:00Z");
     const result = isInFreezeWindow(
-      [{ days: ["friday"], afterHour: 15, timezone: "UTC", message: "No Friday deploys!" }],
+      [
+        {
+          days: ["friday"],
+          afterHour: 15,
+          timezone: "UTC",
+          message: "No Friday deploys!",
+        },
+      ],
       friday3pm,
     );
     expect(result.frozen).toBe(true);

@@ -2,6 +2,68 @@
 
 All notable changes to DeployGuard will be documented in this file.
 
+## [3.0.0] - 2026-04-10
+
+### Architecture
+
+- **Unified risk engine** (`src/risk-engine.ts`) — pure scoring logic shared across the GitHub Action, MCP server, and GitHub App. Eliminates 3 separate implementations.
+- New `RiskConfig` interface for framework-agnostic risk configuration.
+
+### DORA-5 Metrics
+
+- **Failed Deployment Recovery Time (FDRT)** — new metric using GitHub Deployments API.
+- **Change Rework Rate** — identifies PRs that modify same files within 7-day windows.
+- **Per-environment DORA** — filter metrics by deployment environment using `dora-environment` input.
+- **Per-service views** — `.deployguard.yml` `services` map enables monorepo DORA breakdown.
+- New outputs: `dora-fdrt`, `dora-rework-rate`.
+- Report header changed from "DORA Metrics" to "DORA-5 Metrics" with all 5 metrics.
+
+### Security
+
+- **SARIF / Code Scanning integration** (`src/security.ts`) — fetches GitHub Code Scanning alerts as a risk factor.
+- New risk factor type `security_alerts` (weight: 4, highest).
+- Configurable via `.deployguard.yml` `security` section: `severity_threshold`, `block_on_critical`, `ignore_rules`.
+- New input: `security-gate` (default `"true"`).
+- New output: `security-alerts-json`.
+- Security alerts section added to gate report.
+
+### Canary / Progressive Deployment
+
+- **Deploy outcome tracking** (`src/canary.ts`) — parse Vercel and generic deployment webhooks.
+- New risk factor type `deployment_history` (weight: 2).
+- Vercel webhook parser for `deployment.completed` events.
+- Generic webhook parser with configurable field mapping via `.deployguard.yml` `canary` section.
+- New `POST /webhook/deploy-outcome` endpoint on the GitHub App server.
+
+### MCP Server (v3.0.0)
+
+- **`evaluate-policy`** — full policy evaluation tool for CI agents (risk + security + DORA).
+- **`get-security-alerts`** — fetch Code Scanning alerts by severity.
+- **`get-deployment-status`** — environment-aware deployment info.
+- **`suggest-deploy-timing`** — freeze window + failure-aware timing advice.
+- All tools now use shared `risk-engine.ts` for consistent scoring.
+- DORA tool supports optional `environment` filter.
+
+### GitHub Integration
+
+- **Environment-aware thresholds** — `.deployguard.yml` `environments` section overrides risk/warn thresholds per environment.
+- **Merge queue detection** — skips `author_history` factor for `merge_group` events.
+- **App handler improvements** — loads `.deployguard.yml` from repo, applies per-environment thresholds, actually validates webhook signature.
+- New input: `environment`.
+
+### CLI (v3.0.0)
+
+- New wizard prompts: environment configuration, service mapping, security gate, canary webhook type.
+- Generated workflow uses `@v3` tag.
+
+### Types
+
+- Extended `RiskFactor.type` enum: `security_alerts`, `deployment_history`, `canary_status`.
+- New schemas: `EnvironmentConfig`, `ServiceMapping`, `SecurityConfig`, `CanaryConfig`.
+- `RepoConfig` extended with `environments`, `services`, `security`, `canary`.
+- `GateEvaluation` extended with `environment`, `service`.
+- `DeployGuardConfig` extended with `environment`, `securityGate`.
+
 ## [2.2.0] - 2026-04-10
 
 ### Added
