@@ -1,0 +1,91 @@
+# DeployGuard for GitLab CI
+#
+# This pipeline replicates DeployGuard's risk scoring for GitLab merge requests.
+# Since DeployGuard is a GitHub Action, this template uses the MCP server's
+# compute-risk-score tool via a Node.js script to score changed files.
+#
+# Prerequisites:
+# - Clone the deployguard repo and build the MCP server, or use a published image.
+# - Set CI/CD variables: DEPLOYGUARD_RISK_THRESHOLD (default: 70)
+#
+# Copy to your repo's .gitlab-ci.yml or include it.
+
+stages:
+  - gate
+
+deployguard:
+  stage: gate
+  image: node:20-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    RISK_THRESHOLD: "${DEPLOYGUARD_RISK_THRESHOLD:-70}"
+    WARN_THRESHOLD: "${DEPLOYGUARD_WARN_THRESHOLD:-55}"
+  script:
+    - |
+      echo "DeployGuard — scoring merge request !${CI_MERGE_REQUEST_IID}"
+
+      # Collect changed files and line counts from the MR diff
+      FILES_JSON=$(git diff --numstat "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD" \
+        | awk '{print "{\"filename\":\""$3"\",\"changes\":"($1+$2)"}"}' \
+        | paste -sd ',' | sed 's/^/[/;s/$/]/')
+
+      if [ "$FILES_JSON" = "[]" ]; then
+        echo "No files changed — score 0, decision: allow"
+        exit 0
+      fi
+
+      # Use Node.js to compute risk score via the shared risk engine logic
+      node -e "
+        const files = JSON.parse(process.argv[1]);
+        const totalChanges = files.reduce((s, f) => s + f.changes, 0);
+        const fileCount = files.length;
+
+        // Simplified scoring (mirrors risk-engine.ts logic)
+        const sensitivePatterns = [
+          /(?:^|\/)migrations\//i, /(?:^|\/)auth/i, /(?:^|\/)security/i,
+          /(?:^|\/)payment/i, /(?:^|\/)billing/i, /(?:^|\/)webhook/i,
+          /(?:^|\/)infrastructure\//i, /(?:^|\/)\.github\/workflows\//i,
+        ];
+        const sensitiveCount = files.filter(f =>
+          sensitivePatterns.some(p => p.test(f.filename))
+        ).length;
+
+        const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
+        const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + totalChanges / 50)));
+        const sensitiveScore = Math.min(100, sensitiveCount * 25);
+
+        const factors = [
+          { type: 'file_count', score: fileCountScore, weight: 2 },
+          { type: 'code_churn', score: churnScore, weight: 3 },
+        ];
+        if (sensitiveCount > 0) {
+          factors.push({ type: 'sensitive_files', score: sensitiveScore, weight: 3 });
+        }
+
+        const totalWeight = factors.reduce((s, f) => s + f.weight, 0);
+        const score = Math.round(factors.reduce((s, f) => s + f.score * f.weight, 0) / totalWeight);
+
+        const threshold = parseInt(process.env.RISK_THRESHOLD, 10);
+        const warnThreshold = parseInt(process.env.WARN_THRESHOLD, 10);
+        const decision = score > threshold ? 'block' : score > warnThreshold ? 'warn' : 'allow';
+
+        console.log('');
+        console.log('DeployGuard Risk Report');
+        console.log('======================');
+        console.log('Score:    ' + score + '/100');
+        console.log('Decision: ' + decision.toUpperCase());
+        console.log('Files:    ' + fileCount);
+        console.log('Changes:  ' + totalChanges + ' lines');
+        if (sensitiveCount > 0) console.log('Sensitive: ' + sensitiveCount + ' file(s)');
+        console.log('');
+        factors.forEach(f => console.log('  ' + f.type + ': ' + f.score + '/100'));
+
+        if (decision === 'block') {
+          console.error('BLOCKED: risk score ' + score + ' exceeds threshold ' + threshold);
+          process.exit(1);
+        }
+      " "$FILES_JSON"
+  allow_failure:
+    exit_codes:
+      - 1
