@@ -30,16 +30,28 @@ pass through human-supervised review. That review happens in YOUR workspace.
 ┌──────────────────────────────────────────────┐
 │  Komatik HQ NUC (24/7 Autonomous)             │
 │  17 agents → branches → PRs → dev             │
-└────────────────────┬─────────────────────────┘
+│                                                │
+│  GitHub Webhooks (MC6) ─────────────────┐     │
+│  push, PR, CI, issues → events table    │     │
+│  PR opened → auto-review workflow:      │     │
+│    security-qa → api-architect →        │     │
+│    release-mgr                          │     │
+└────────────────────┬────────────────────┘
                      │  PRs flow continuously
                      ▼
 ┌──────────────────────────────────────────────┐
 │  YOUR Workspace (Human-Supervised)            │
 │  Review → Approve/Fix → staging → master      │
+│  (HQ may have already pre-reviewed the PR)    │
 └──────────────────────────────────────────────┘
 ```
 
 The NUC agents handle volume. You handle quality gates. Never merge agent code without review.
+
+**New (MC6)**: When a PR is opened or marked ready-for-review, HQ automatically spawns a
+3-step review workflow: **Sentinel** (security-qa) → **Blueprint** (api-architect) →
+**Harbor** (release-mgr). Their findings appear as workflow steps in the events table.
+Check for existing HQ review results before duplicating that work.
 
 ---
 
@@ -134,12 +146,18 @@ gh pr list --state merged --limit 20 \
   --jq '.[] | select(.headRefName | test("^(claude/|agent/)")) | "\(.mergedAt) #\(.number) +\(.additions)/-\(.deletions) — \(.title)"'
 ```
 
+```bash
+# 5. Check real-time GitHub events from HQ (MC6 webhook data)
+CallMcpTool(server="user-komatik-readonly", toolName="query_events", arguments={"limit": 10})
+```
+
 **Decision tree:**
 
 - 0 behind, 0 open, 0 merged → HQ quiet. Proceed normally.
 - Behind dev → Pull before starting work: `git pull origin dev`
-- Open agent PRs → Note them. Review if relevant to your current task.
+- Open agent PRs → Check if HQ's automated review already ran (query events). Review if relevant to your current task.
 - Many merged PRs (5+) → Pull dev, then run build + tests to verify stability.
+- CI failure events in events table → Check if pipeline-ops is already on it before investigating.
 
 ---
 
@@ -355,6 +373,34 @@ These services run on the NUC (accessible via Tailscale VPN at `100.87.31.3`):
 | Code Server          | 3300  | VS Code in browser                              |
 | Prometheus           | 9090  | Metrics scraping                                |
 
+### Public Access via Tailscale Funnel (MC6)
+
+Port 3100 is exposed publicly via Tailscale Funnel at:
+
+```
+https://komatik.tailf56017.ts.net
+```
+
+This is used by GitHub webhooks to deliver events. The webhook handler at
+`/api/webhooks/github` validates HMAC-SHA256 signatures before writing to the `events`
+table. A polling fallback cron runs every 15 minutes to catch missed events.
+
+### GitHub Webhook Integration (MC6 — live as of April 12, 2026)
+
+All 11 project repos have registered webhooks delivering these event types in real-time:
+- `push` — branch updates, commits
+- `pull_request` — opened, closed, merged, ready-for-review
+- `check_run` — CI pass/fail
+- `issues` — created, closed, labeled
+
+**Automated PR review pipeline**: When a PR is opened or marked ready-for-review, HQ
+spawns a 3-step workflow:
+1. **Sentinel** (security-qa) — security scan
+2. **Blueprint** (api-architect) — API contract validation
+3. **Harbor** (release-mgr) — release readiness check
+
+These review results are visible via `query_events` or the dashboard Activity feed.
+
 
 ---
 
@@ -400,9 +446,9 @@ When your work conflicts with agent-created work:
 
 | Situation                       | What to Do                                                   |
 | ------------------------------- | ------------------------------------------------------------ |
-| Starting a new session          | Fetch origin, check how far behind dev, check open agent PRs |
+| Starting a new session          | Fetch origin, check how far behind dev, check open agent PRs, check events table |
 | Starting a new feature          | Search PRs + branches for keyword overlap first              |
-| Open agent PR exists            | Review with 10-point checklist before merging                |
+| Open agent PR exists            | Check if HQ auto-review ran (`query_events`), then apply 10-point checklist |
 | Agent PR has BLOCKING issue     | Request changes with specific fix instructions               |
 | Agent merged bad code to dev    | `git revert <hash> --no-edit && git push origin dev`         |
 | 3+ agent PRs merged in <1 hour  | Spot-check middle PRs, run full test suite                   |
@@ -410,6 +456,7 @@ When your work conflicts with agent-created work:
 | Agent touched same files as you | Check for conflicts before committing your work              |
 | Promoting dev → staging         | Review ALL agent merges since last promotion                 |
 | Schema migration from agent     | **ALWAYS full line-by-line review** — never auto-merge       |
+| CI failure in events table      | Check if pipeline-ops is already handling it before acting   |
 | Unsure about agent code quality | When in doubt, request changes. Better safe than sorry.      |
 
 
@@ -430,6 +477,14 @@ CallMcpTool(server="user-komatik-readonly", toolName="query_agent_runs", argumen
 CallMcpTool(server="user-komatik-readonly", toolName="query_tasks", arguments={"status": "active"})
 CallMcpTool(server="user-komatik-readonly", toolName="get_messages", arguments={"limit": 5})
 CallMcpTool(server="user-komatik-readonly", toolName="query_sql", arguments={"sql": "SELECT COUNT(*) FROM agent_runs"})
+```
+
+**Real-time GitHub events (MC6)** — the `events` table now receives webhook data from all
+11 repos. Query it to see pushes, PRs, CI failures, and issues in real-time:
+
+```
+CallMcpTool(server="user-komatik-readonly", toolName="query_events", arguments={"limit": 20})
+CallMcpTool(server="user-komatik-readonly", toolName="query_sql", arguments={"sql": "SELECT event_type, repo, created_at FROM events ORDER BY created_at DESC LIMIT 10"})
 ```
 
 Available tools: `get_system_health`, `query_agent_runs`, `query_tasks`, `query_events`,
@@ -453,6 +508,11 @@ agents active, 34 inter-agent messages, 5 running workflows, 38 tasks on the boa
 
 Placeholder files in git (like empty intel reports) do NOT mean the system hasn't run.
 Runtime state lives in PostgreSQL, not in git-committed files.
+
+### Roadmap Status (as of April 12, 2026)
+
+- **MC6 (GitHub Webhook Integration)**: COMPLETED — real-time event delivery from all 11 repos
+- **MC8 (QuickBooks Online OAuth2 flow)**: Active — the only remaining HQ goal
 
 ### Known Open Issues (as of April 12, 2026)
 
@@ -478,36 +538,29 @@ Runtime state lives in PostgreSQL, not in git-committed files.
 
 ## Infrastructure Changes (distributed 2026-04-12)
 
-The following ecosystem-wide changes are now live:
-
 ### Branch Protection (all 13 repos)
 - **main/master**: Protected — requires PR + 1 approval, no force push
 - **staging**: New branch, protected — requires PR + 1 approval
 - **dev**: Semi-protected — no force push, no branch deletion
 - Flow: `agent/* / claude/*` → `dev` → `staging` → `main/master`
 
-### CI Safety Gates
-Three shared workflows are available from the org-level `.github` repo:
+### CI Safety Gates (org-level shared workflows)
 - **agent-pr-lint** — blocks agent PRs with destructive SQL, secrets, missing RLS
 - **promote-gate** — build/test gate for staging/production promotions
 - **deployguard-check** — deployment risk assessment
 
-### Migration Safety
-- New `migration-safety.yml` workflow runs on all PRs touching `supabase/migrations/`
-- Checks: destructive SQL (blocking), duplicate timestamps (blocking), missing RLS (blocking)
-
 ### Supabase Staging Environment
-- New staging project: `komatik-staging` (ref: `lwelkeqcmxbszdqqaonr`)
-- Migrations auto-push to staging on merge to `staging` branch
-- Production (`sdmfolczsaqiyararqwh`) only receives migrations via `master`
+- Staging project: `komatik-staging` (ref: `lwelkeqcmxbszdqqaonr`)
+- Production: `sdmfolczsaqiyararqwh` (unchanged)
 
 ### Standard Labels (all repos)
-- `agent-authored`, `needs-review`, `migration`, `cross-repo`
-- `hq-coordination`, `promotion-ready`, `security`, `rapid-fire`
+`agent-authored`, `needs-review`, `migration`, `cross-repo`,
+`hq-coordination`, `promotion-ready`, `security`, `rapid-fire`
 
 ---
 
 ## Project-Specific
+
 
 <!-- Add project-specific Claude Code instructions below this line -->
 <!-- These sections are preserved across re-distributions -->

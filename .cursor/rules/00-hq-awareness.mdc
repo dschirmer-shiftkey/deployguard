@@ -14,9 +14,22 @@ alwaysApply: true
 code into `dev` continuously. **You are the last line of defense** before code reaches
 `staging` or `master`.
 
-## Branch Strategy (enforced across all repos)
+## MC6: GitHub Webhook Integration (LIVE)
 
-All repos now follow a consistent protected branch flow:
+HQ now receives real-time GitHub events from all 11 repos via webhooks. When a PR is
+opened or marked ready-for-review, HQ spawns a 3-step automated review:
+1. **Sentinel** (security-qa) — security scan
+2. **Blueprint** (api-architect) — API contract validation
+3. **Harbor** (release-mgr) — release readiness check
+
+**Before reviewing a PR manually**, check if HQ already reviewed it:
+```
+CallMcpTool(server="user-komatik-readonly", toolName="query_events", arguments={"limit": 10})
+```
+
+HQ pre-screening reduces manual work, but **human review is still mandatory**.
+
+## Branch Strategy (enforced across all repos)
 
 ```
 agent/* / claude/*  →  dev  →  staging  →  main/master
@@ -26,8 +39,6 @@ agent/* / claude/*  →  dev  →  staging  →  main/master
 - **staging**: Protected. Requires PR + 1 approval. Staging environment.
 - **dev**: Semi-protected. No force push. Development integration branch.
 
-CI workflows run automatically on agent PRs (destructive SQL, secrets, RLS checks).
-
 ## 4 Mandatory Workflows
 
 ### 1. Session Start
@@ -36,6 +47,7 @@ git fetch origin --prune
 git log --oneline HEAD..origin/dev | wc -l
 gh pr list --state open --json number,title,headRefName --jq '.[] | select(.headRefName | test("^(claude/|agent/)")) | "#\(.number) — \(.title)"'
 ```
+Also check events table: `CallMcpTool(server="user-komatik-readonly", toolName="query_events", arguments={"limit": 10})`
 
 ### 2. Before Any New Task
 ```bash
@@ -79,20 +91,12 @@ npm test
 **VERIFY CAREFULLY**: pipeline logic, model routing, UI, API routes
 **ALWAYS LINE-BY-LINE**: schema migrations, RLS, Stripe/payment, auth, Edge Functions
 
-## Coordination Labels
-
-Use these standardized labels (available on all repos):
-- `agent-authored` — Created by a Komatik HQ autonomous agent
-- `needs-review` — Awaiting human review before merge
-- `migration` — Contains database migration (extra scrutiny)
-- `cross-repo` — Affects multiple repositories
-- `promotion-ready` — Reviewed and ready for dev-to-staging promotion
-
 ## MCP Bridge — Verify HQ State
 
 ```
 CallMcpTool(server="user-komatik-readonly", toolName="get_system_health", arguments={})
 CallMcpTool(server="user-komatik-readonly", toolName="query_agent_runs", arguments={"limit": 10})
+CallMcpTool(server="user-komatik-readonly", toolName="query_events", arguments={"limit": 10})
 ```
 
 NEVER conclude HQ "hasn't launched" from git alone. Query the MCP bridge first.
