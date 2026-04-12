@@ -38,7 +38,6 @@ The NUC agents handle volume. You handle quality gates. Never merge agent code w
 
 ## The HQ Agent Team
 
-
 | Codename      | Agent ID          | Role                                                        | Risk Level                    |
 | ------------- | ----------------- | ----------------------------------------------------------- | ----------------------------- |
 | **Koda**      | coordinator       | Chief of Staff — delegation, briefings, strategic oversight | LOW (orchestration only)      |
@@ -58,7 +57,6 @@ The NUC agents handle volume. You handle quality gates. Never merge agent code w
 | **Edison**    | rd-platform       | R&D platform research                                       | LOW (research)                |
 | **Nova**      | rd-satellite      | R&D satellite product research                              | LOW (research)                |
 | **Beacon**    | marketing         | Marketing, growth, content, SEO tracking                    | LOW (content)                 |
-
 
 ### Monitored Repositories (11+)
 
@@ -85,7 +83,6 @@ be creating PRs against it:
 
 HQ agents create branches with these naming patterns. Learn to recognize them:
 
-
 | Pattern                                | Origin                            | Example                                         |
 | -------------------------------------- | --------------------------------- | ----------------------------------------------- |
 | `claude/<two-word-slug>`               | Claude Code session on NUC        | `claude/keen-bell`, `claude/flamboyant-faraday` |
@@ -93,8 +90,7 @@ HQ agents create branches with these naming patterns. Learn to recognize them:
 | `cursor/<description>-<4-char-hex>`    | Cursor session on NUC             | `cursor/deployguard-logic-issues-5ef5`          |
 | `cursor/<description>` (no hex suffix) | **Probably YOUR local workspace** | `cursor/promote-dev-to-staging`                 |
 
-
-**Ambiguity warning**: Both local workspaces and the NUC create `cursor/`* branches. To
+**Ambiguity warning**: Both local workspaces and the NUC create `cursor/`\* branches. To
 confirm origin, check the commit author:
 
 ```bash
@@ -191,7 +187,6 @@ gh pr diff <PR_NUMBER>
 
 A single failure at BLOCKING severity = **reject the PR**.
 
-
 | #   | Check                   | How to Verify                                                                                                 | Severity                                                                    |
 | --- | ----------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | 1   | **No destructive SQL**  | `gh pr diff N                                                                                                 | grep "^+"                                                                   |
@@ -204,7 +199,6 @@ A single failure at BLOCKING severity = **reject the PR**.
 | 8   | **Rate limiting**       | Routes calling LLMs, Stripe, or batch operations must have rate limiting                                      | HIGH                                                                        |
 | 9   | **Type safety**         | `gh pr diff N                                                                                                 | grep "^+"                                                                   |
 | 10  | **Import resolution**   | New imports must resolve: `git ls-tree -r origin/dev --name-only                                              | grep "imported-filename"`                                                   |
-
 
 #### Step 3: Check CI status
 
@@ -306,10 +300,12 @@ If you discover an agent merged harmful code (destructive SQL, auth bypass, secr
 
 1. **Don't panic.** `dev` is not production. `staging` and `master` are protected branches.
 2. **Revert the merge commit immediately:**
-  ```bash
-   git revert <merge-commit-hash> --no-edit
-   git push origin dev
-  ```
+
+```bash
+ git revert <merge-commit-hash> --no-edit
+ git push origin dev
+```
+
 3. **Close any open PRs** from the same agent session to prevent further damage.
 4. **Notify David** — include the PR number, what was destructive, and the revert commit.
 5. **Document the incident** for future reference.
@@ -319,7 +315,6 @@ If you discover an agent merged harmful code (destructive SQL, auth bypass, secr
 ## HQ Infrastructure Reference
 
 These services run on the NUC (accessible via Tailscale VPN at `100.87.31.3`):
-
 
 | Service              | Port  | Purpose                                         |
 | -------------------- | ----- | ----------------------------------------------- |
@@ -332,13 +327,11 @@ These services run on the NUC (accessible via Tailscale VPN at `100.87.31.3`):
 | Code Server          | 3300  | VS Code in browser                              |
 | Prometheus           | 9090  | Metrics scraping                                |
 
-
 ---
 
 ## HQ Agent Scheduling
 
 The agents run on cron schedules. Expect activity at these times (all UTC):
-
 
 | Time (UTC) | Agent                     | Activity                                   |
 | ---------- | ------------------------- | ------------------------------------------ |
@@ -353,7 +346,6 @@ The agents run on cron schedules. Expect activity at these times (all UTC):
 | 17:00      | Orbit (satellite-watcher) | Afternoon repo scan                        |
 | 18:00      | Koda (coordinator)        | **Evening wrap-up**                        |
 | 22:00      | Pixel (frontend-dev)      | Overnight dependency updates + issue fixes |
-
 
 Heaviest autonomous coding activity happens overnight (22:00–09:00 UTC). Expect the most
 PRs and merges to accumulate during this window.
@@ -373,7 +365,6 @@ When your work conflicts with agent-created work:
 
 ## Quick Reference Card
 
-
 | Situation                       | What to Do                                                   |
 | ------------------------------- | ------------------------------------------------------------ |
 | Starting a new session          | Fetch origin, check how far behind dev, check open agent PRs |
@@ -388,7 +379,6 @@ When your work conflicts with agent-created work:
 | Schema migration from agent     | **ALWAYS full line-by-line review** — never auto-merge       |
 | Unsure about agent code quality | When in doubt, request changes. Better safe than sorry.      |
 
-
 ---
 
 ## CRITICAL: What You Cannot See (Static-Only Limitation)
@@ -402,7 +392,6 @@ Your workspace **cannot** access the Komatik HQ runtime. You have no connection 
 
 ### What This Means for Auditing
 
-
 | You CAN Audit (static)                            | You CANNOT Audit (runtime)                   |
 | ------------------------------------------------- | -------------------------------------------- |
 | Code correctness (imports, types, logic)          | Whether agents are actually running          |
@@ -410,7 +399,6 @@ Your workspace **cannot** access the Komatik HQ runtime. You have no connection 
 | Structural coherence (migration → code alignment) | Whether MCP tools work at runtime            |
 | Branch/PR quality (diffs, CI status)              | Whether intel files are populated on the NUC |
 | Dependency safety                                 | Whether cron jobs are executing on schedule  |
-
 
 ### The Rule
 
@@ -429,11 +417,11 @@ not verified."
 
 These are actual bugs in the `komatik-agents` codebase worth tracking:
 
-1. `**financial_transactions` table mismatch** — MCP `query_financials` tool queries a
-  non-existent table. DB has `revenue_entries` + `expense_entries` instead.
+1. `**financial_transactions` table mismatch\*\* — MCP `query_financials` tool queries a
+   non-existent table. DB has `revenue_entries` + `expense_entries` instead.
 2. **3 missing agent memory directories** — `marketing`, `rd-platform`, `rd-satellite`.
 3. **Hardcoded credentials** — DB password fallback in 7 hook scripts; Grafana/code-server
-  passwords in committed `context/state.json`.
+   passwords in committed `context/state.json`.
 4. **5 of 6 intel files still placeholders** — only `REPO-STATUS.md` has real data.
 5. **Bored complexity routing** — Haiku model assigned to a complex canvas app (undertuned).
 
@@ -450,4 +438,3 @@ These are actual bugs in the `komatik-agents` codebase worth tracking:
 > Check before you build. Review before you merge. Test before you promote.
 >
 > And never judge a running system by its git snapshots alone.
-

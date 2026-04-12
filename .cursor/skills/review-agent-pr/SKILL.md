@@ -29,6 +29,7 @@ gh pr diff <N>
 ```
 
 Verify:
+
 - Branch follows expected naming convention
 - Commit messages use conventional format (`<type>(<scope>): <description>`)
 - PR body describes what and why
@@ -37,29 +38,29 @@ Verify:
 
 A single failure at **BLOCKING** severity = reject the PR.
 
-| # | Check | How to Verify | Severity |
-| - | ----- | ------------- | -------- |
-| 1 | **No destructive SQL** | `gh pr diff N \| rg "^+" \| rg -i "(DROP\|TRUNCATE\|DELETE FROM)"` | **BLOCKING** |
-| 2 | **RLS on new tables** | `gh pr diff N \| rg "^+" \| rg -i "CREATE TABLE"` — if found, verify matching RLS policy | **BLOCKING** |
-| 3 | **Auth on API routes** | `gh pr diff N --name-only \| rg "route.ts"` — new routes must have auth checks | **BLOCKING** |
-| 4 | **No secrets in code** | `gh pr diff N \| rg "^+" \| rg -i "(api[_-]?key\|secret\|token\|password\|credential\|PRIVATE_KEY)"` | **BLOCKING** |
-| 5 | **No force pushes** | Verify single clean commit chain — no rewritten history | **BLOCKING** |
-| 6 | **Prompt sanitization** | New LLM calls must wrap user input in `sanitizeForPrompt()` | **BLOCKING** |
-| 7 | **Ownership checks** | Data mutation routes must verify user owns the resource | HIGH |
-| 8 | **Rate limiting** | Routes calling LLMs, Stripe, or batch ops must have rate limiting | HIGH |
-| 9 | **Type safety** | `gh pr diff N \| rg "^+" \| rg "(as any\|@ts-ignore\|@ts-expect-error)"` | MEDIUM |
-| 10 | **Import resolution** | New imports must resolve against `origin/main` | MEDIUM |
+| #   | Check                   | How to Verify                                                                                        | Severity     |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | **No destructive SQL**  | `gh pr diff N \| rg "^+" \| rg -i "(DROP\|TRUNCATE\|DELETE FROM)"`                                   | **BLOCKING** |
+| 2   | **RLS on new tables**   | `gh pr diff N \| rg "^+" \| rg -i "CREATE TABLE"` — if found, verify matching RLS policy             | **BLOCKING** |
+| 3   | **Auth on API routes**  | `gh pr diff N --name-only \| rg "route.ts"` — new routes must have auth checks                       | **BLOCKING** |
+| 4   | **No secrets in code**  | `gh pr diff N \| rg "^+" \| rg -i "(api[_-]?key\|secret\|token\|password\|credential\|PRIVATE_KEY)"` | **BLOCKING** |
+| 5   | **No force pushes**     | Verify single clean commit chain — no rewritten history                                              | **BLOCKING** |
+| 6   | **Prompt sanitization** | New LLM calls must wrap user input in `sanitizeForPrompt()`                                          | **BLOCKING** |
+| 7   | **Ownership checks**    | Data mutation routes must verify user owns the resource                                              | HIGH         |
+| 8   | **Rate limiting**       | Routes calling LLMs, Stripe, or batch ops must have rate limiting                                    | HIGH         |
+| 9   | **Type safety**         | `gh pr diff N \| rg "^+" \| rg "(as any\|@ts-ignore\|@ts-expect-error)"`                             | MEDIUM       |
+| 10  | **Import resolution**   | New imports must resolve against `origin/main`                                                       | MEDIUM       |
 
 ## Step 4 — DeployGuard-specific checks
 
 In addition to the 10-point checklist:
 
-| # | Check | How to Verify |
-| - | ----- | ------------- |
-| D1 | **action.yml parity** | If `src/main.ts` inputs/outputs changed, `action.yml` must match |
-| D2 | **Fail-open preserved** | Gate errors must not block deployments (unless `fail-mode: closed`) |
-| D3 | **risk-engine stays agnostic** | `src/risk-engine.ts` must not import `@actions/*` — it's shared by MCP/App |
-| D4 | **dist/ rebuilt** | Any `src/` change requires `npm run build` + committing updated `dist/index.js` |
+| #   | Check                          | How to Verify                                                                   |
+| --- | ------------------------------ | ------------------------------------------------------------------------------- |
+| D1  | **action.yml parity**          | If `src/main.ts` inputs/outputs changed, `action.yml` must match                |
+| D2  | **Fail-open preserved**        | Gate errors must not block deployments (unless `fail-mode: closed`)             |
+| D3  | **risk-engine stays agnostic** | `src/risk-engine.ts` must not import `@actions/*` — it's shared by MCP/App      |
+| D4  | **dist/ rebuilt**              | Any `src/` change requires `npm run build` + committing updated `dist/index.js` |
 
 ## Step 5 — Check CI status
 

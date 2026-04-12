@@ -92,12 +92,12 @@ DeployGuard is one of 13 repositories monitored by **Komatik HQ** — a 17-agent
 
 ### Agent branch patterns
 
-| Pattern | Origin |
-| ------- | ------ |
-| `claude/<two-word-slug>` | Claude Code session on NUC |
-| `agent/<agent-id>/<description>` | OpenClaw scheduled agent |
-| `cursor/<description>-<4-char-hex>` | Cursor session on NUC |
-| `cursor/<description>` (no hex) | Probably local Cursor (David) |
+| Pattern                             | Origin                        |
+| ----------------------------------- | ----------------------------- |
+| `claude/<two-word-slug>`            | Claude Code session on NUC    |
+| `agent/<agent-id>/<description>`    | OpenClaw scheduled agent      |
+| `cursor/<description>-<4-char-hex>` | Cursor session on NUC         |
+| `cursor/<description>` (no hex)     | Probably local Cursor (David) |
 
 ### Key rule
 
