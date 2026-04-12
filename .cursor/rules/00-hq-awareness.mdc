@@ -1,0 +1,109 @@
+---
+description: Komatik HQ Autonomous Workforce Awareness — you are the last line of defense
+alwaysApply: true
+---
+
+# Komatik HQ Awareness
+
+> Source: Komatik/.cursor/rules/KOMATIK-HQ-PROMPT.md
+> Last distributed: 2026-04-12
+
+## What Is Komatik HQ?
+
+17 AI agents run 24/7 on a headless NUC, creating branches, opening PRs, and merging
+code into `dev` continuously. **You are the last line of defense** before code reaches
+`staging` or `master`.
+
+## Branch Strategy (enforced across all repos)
+
+All repos now follow a consistent protected branch flow:
+
+```
+agent/* / claude/*  →  dev  →  staging  →  main/master
+```
+
+- **main/master**: Protected. Requires PR + 1 approval. Production.
+- **staging**: Protected. Requires PR + 1 approval. Staging environment.
+- **dev**: Semi-protected. No force push. Development integration branch.
+
+CI workflows run automatically on agent PRs (destructive SQL, secrets, RLS checks).
+
+## 4 Mandatory Workflows
+
+### 1. Session Start
+```bash
+git fetch origin --prune
+git log --oneline HEAD..origin/dev | wc -l
+gh pr list --state open --json number,title,headRefName --jq '.[] | select(.headRefName | test("^(claude/|agent/)")) | "#\(.number) — \(.title)"'
+```
+
+### 2. Before Any New Task
+```bash
+gh pr list --state all --limit 50 --json number,title,state --jq '.[] | select(.title | test("KEYWORD"; "i")) | "\(.state) #\(.number) — \(.title)"'
+git branch -r | grep -i "KEYWORD"
+```
+
+### 3. Reviewing Agent PRs — 10-Point Security Checklist
+A single BLOCKING failure = reject the PR.
+
+1. **No destructive SQL** — BLOCKING
+2. **RLS on new tables** — BLOCKING
+3. **Auth on API routes** — BLOCKING
+4. **No secrets in code** — BLOCKING
+5. **No force pushes** — BLOCKING
+6. **Prompt sanitization** — BLOCKING
+7. **Ownership checks** — HIGH
+8. **Rate limiting** — HIGH
+9. **Type safety** — HIGH
+10. **Import resolution** — MEDIUM
+
+### 4. After Agent Merges — Stability Check
+```bash
+git checkout dev && git pull origin dev
+npm run build
+npm test
+```
+
+## Agent Branch Patterns
+
+| Pattern | Origin |
+|---------|--------|
+| `claude/<two-word-slug>` | Claude Code on NUC |
+| `agent/<agent-id>/<desc>` | OpenClaw scheduled agent |
+| `cursor/<desc>-<4hex>` | Cursor on NUC |
+| `cursor/<desc>` (no hex) | Probably YOUR workspace |
+
+## Trust Levels
+
+**HIGH TRUST (quick review)**: docs, dependency patches, lint fixes, tests
+**VERIFY CAREFULLY**: pipeline logic, model routing, UI, API routes
+**ALWAYS LINE-BY-LINE**: schema migrations, RLS, Stripe/payment, auth, Edge Functions
+
+## Coordination Labels
+
+Use these standardized labels (available on all repos):
+- `agent-authored` — Created by a Komatik HQ autonomous agent
+- `needs-review` — Awaiting human review before merge
+- `migration` — Contains database migration (extra scrutiny)
+- `cross-repo` — Affects multiple repositories
+- `promotion-ready` — Reviewed and ready for dev-to-staging promotion
+
+## MCP Bridge — Verify HQ State
+
+```
+CallMcpTool(server="user-komatik-readonly", toolName="get_system_health", arguments={})
+CallMcpTool(server="user-komatik-readonly", toolName="query_agent_runs", arguments={"limit": 10})
+```
+
+NEVER conclude HQ "hasn't launched" from git alone. Query the MCP bridge first.
+
+## Emergency: Agent Merged Bad Code
+
+1. `git revert <hash> --no-edit && git push origin dev`
+2. Close open PRs from the same agent session
+3. Notify David with PR number and what was destructive
+
+## The Rule
+
+> The agents work for us. We don't work for them.
+> Check before you build. Review before you merge. Test before you promote.
