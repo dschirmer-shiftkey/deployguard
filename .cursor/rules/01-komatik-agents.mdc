@@ -1,59 +1,59 @@
 ---
-description: Komatik autonomous agent workforce awareness and review-first workflow
+description: DeployGuard-specific adaptations for the Komatik HQ agent coordination protocol
 globs:
   - "**/*"
 ---
 
-# Komatik Agent-Aware Workflow
+# DeployGuard — Komatik HQ Adaptations
 
-## Context
+> The full protocol lives in `.cursor/rules/KOMATIK-HQ-PROMPT.md`. This file
+> documents only what differs for the DeployGuard repo.
 
-DeployGuard is monitored by **Komatik HQ** — a 17-agent autonomous AI workforce running 24/7 on a headless NUC. Agents push code, create PRs, and open issues around the clock. This Cursor session is **David's human-in-the-loop** — the final gate before anything lands on `main`.
+## Branch differences
 
-Source of truth: `dschirmer-shiftkey/komatik-agents` (private repo).
+DeployGuard is a **satellite repo**. The default branch is `main` (not `dev`).
 
-## Agents that interact with this repo
+Wherever the HQ prompt says `dev`, substitute `main` for this repo:
+- `git log --oneline HEAD..origin/main` (not `origin/dev`)
+- `git pull origin main` (not `origin/dev`)
+- `git revert <hash> --no-edit && git push origin main` (emergency revert)
+- Agent PRs target `main`
 
-| Agent | Role | How it touches DeployGuard |
-| ----- | ---- | -------------------------- |
-| **Orbit** (satellite-watcher) | Cross-repo monitor | Scans CI status, open PRs, issues. Writes `projects/deployguard/STATUS.md` in komatik-agents |
-| **Sentinel** (security-qa) | Security auditor | May flag vulnerabilities, open security-related PRs. Has veto power |
-| **Pixel** (frontend-dev) | Developer | May implement features or fixes assigned by coordinator |
-| **Harbor** (release-mgr) | Release manager | Creates PRs, manages git ops, handles merges |
-| **Relay** (pipeline-ops) | Pipeline ops | Monitors CI health, may fix pipeline issues |
-| **Koda** (coordinator) | Coordinator | Delegates tasks, creates workflows, triages findings |
+There is no `staging` or `master` branch. `main` is the production branch — code pushed here is what the GitHub Action runs.
 
-## Session start — check for agent work FIRST
+## Stability check commands (Workflow 4)
 
-Before starting any new work, always check if the autonomous agents have pushed changes:
+DeployGuard's CI pipeline differs from the Komatik monorepo:
 
-1. `git fetch origin` — pull latest refs
-2. `gh pr list --state open` — any open PRs? Agent PRs use branch pattern `agent/<agent-name>/<description>`
-3. `git log --oneline origin/main..HEAD` and `git log --oneline HEAD..origin/main` — are we ahead or behind?
-4. `git branch -r | grep agent/` — any agent branches not yet PR'd?
+```bash
+git checkout main && git pull origin main
+npm run format:check
+npm run lint
+npm test
+npm run build
+git diff --exit-code dist/
+```
 
-If agent PRs exist, **review them before starting new work**. Use the `review-agent-pr` skill.
+The `dist/` drift check is critical — `dist/index.js` is the bundled Action runtime that GitHub executes directly.
 
-## Review-first posture
+## Trust levels for this repo
 
-We are the last defense against bad or destructive code. Agent PRs must be:
+| Agent change | Review level | Why |
+| ------------ | ------------ | --- |
+| `action.yml` inputs/outputs | Full line-by-line | Contract change — breaks all consumers |
+| `src/risk-engine.ts` | Full line-by-line | Shared across Action, MCP, App |
+| `src/gate.ts`, `src/main.ts` | Careful review | Core orchestration |
+| `src/security.ts`, `src/canary.ts` | Careful review | Security-sensitive modules |
+| `dist/index.js` | Verify via build | Never review manually — rebuild and diff |
+| `mcp/`, `app/`, `cli/` | Normal review | Separate projects, lower blast radius |
+| Docs, README, CHANGELOG | Quick review | High trust |
+| Test additions | Quick review | High trust |
 
-1. **Tested locally** — run full CI: `npm run format:check && npm run lint && npm test && npm run build`
-2. **Checked for destructive patterns** — file deletions, permission changes, dependency removals, force pushes
-3. **Checked for secrets** — no API keys, tokens, or credentials in the diff
-4. **Aligned with roadmap** — the change should map to a known goal in `projects/deployguard/ROADMAP.md`
-5. **Never merged blindly** — even if CI is green on remote, verify locally
+## DeployGuard-specific security checks
 
-## Branch conventions
+In addition to the 10-point checklist from the HQ prompt, check:
 
-| Pattern | Origin |
-| ------- | ------ |
-| `agent/<agent-name>/<description>` | Komatik autonomous agent |
-| `feat/`, `fix/`, `chore/`, `docs/` | Human (David via Cursor) |
-| `main` | Protected — agents should never push directly |
-
-## After reviewing/merging agent work
-
-If the komatik-agents project status files are stale, update them via GitHub API:
-- `projects/deployguard/STATUS.md` — current repo health
-- `projects/deployguard/ROADMAP.md` — mark completed goals, add new ones
+1. **action.yml parity** — if `src/main.ts` inputs/outputs changed, `action.yml` must match
+2. **Fail-open preserved** — gate errors must not block deployments (unless `fail-mode: closed`)
+3. **No @actions/\* imports in risk-engine.ts** — this module must stay framework-agnostic for MCP/App sharing
+4. **dist/ rebuilt** — any `src/` change requires `npm run build` and committing the new `dist/index.js`

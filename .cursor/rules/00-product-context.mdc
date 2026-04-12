@@ -15,10 +15,11 @@ globs:
 
 ## Autonomous agents may have pushed work
 
-This repo is monitored by Komatik HQ (17 autonomous agents, 24/7). Before starting work:
-1. `git fetch origin` — check for remote changes
-2. `gh pr list --state open` — review any agent PRs (branch pattern: `agent/<name>/<desc>`)
-3. Agent PRs must be reviewed locally before merge — see `review-agent-pr` skill
+This repo is monitored by Komatik HQ (17 autonomous agents, 24/7). Follow the full session-start protocol in `KOMATIK-HQ-PROMPT.md` (Workflow 1). Key steps:
+1. `git fetch origin --prune` — sync remote state
+2. `git log --oneline HEAD..origin/main | wc -l` — how far behind?
+3. `gh pr list --state open` — check for agent PRs (`agent/`, `claude/`, `cursor/*-<hex>`)
+4. Agent PRs must pass the 10-point security checklist before merge — see `review-agent-pr` skill
 
 ## Before large edits
 

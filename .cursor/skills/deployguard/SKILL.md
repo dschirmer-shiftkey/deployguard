@@ -13,14 +13,12 @@ description: Load DeployGuard product context for the deployment gate — Action
 
 ## Before starting work (Komatik agent check)
 
-This repo is monitored 24/7 by **Komatik HQ** (17 autonomous agents). Before starting any work:
+This repo is monitored 24/7 by **Komatik HQ** (17 autonomous agents). Follow the full session-start protocol in `.cursor/rules/KOMATIK-HQ-PROMPT.md` (Workflow 1). Quick version:
 
-1. `git fetch origin` — pull latest refs
-2. `gh pr list --state open` — check for agent PRs (branch: `agent/<name>/<desc>`)
-3. `git log --oneline HEAD..origin/main` — check if remote is ahead
-4. If agent PRs exist, review them first using the **`review-agent-pr`** skill
-
-Key agents: **Orbit** (monitors CI/PRs), **Sentinel** (security audits), **Pixel** (implements), **Harbor** (release ops), **Relay** (pipeline fixes).
+1. `git fetch origin --prune`
+2. `git log --oneline HEAD..origin/main | wc -l` — how far behind?
+3. `gh pr list --state open --json number,title,headRefName,additions,deletions --jq '.[] | select(.headRefName | test("^(claude/|agent/)")) | "#\(.number) +\(.additions)/-\(.deletions) — \(.title)"'`
+4. If agent PRs exist, review them first using the **`review-agent-pr`** skill (10-point security checklist)
 
 ## Required reading (in order)
 

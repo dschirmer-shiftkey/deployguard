@@ -84,31 +84,24 @@ app/src/handler.ts   → GitHub App webhook handler (imports risk-engine copy)
 
 ## Komatik autonomous workforce
 
-DeployGuard is one of 11 repositories monitored by **Komatik HQ** — a 17-agent autonomous AI workforce running 24/7 on a headless Intel NUC. Agents operate via OpenClaw, coordinate through PostgreSQL + file-based intel, and follow RBAC-enforced tool policies.
+DeployGuard is one of 13 repositories monitored by **Komatik HQ** — a 17-agent autonomous AI workforce running 24/7 on a headless Intel NUC. Agents create branches, open PRs, and merge code around the clock. David's Cursor sessions are the **final human review gate**.
 
-**Source of truth**: `dschirmer-shiftkey/komatik-agents` (private).
-**Project tracking**: `projects/deployguard/STATUS.md`, `ROADMAP.md`, `RESEARCH.md` in that repo.
+**Full protocol**: `.cursor/rules/KOMATIK-HQ-PROMPT.md` — the 4 mandatory workflows, 10-point security checklist, trust levels, rapid-fire detection, emergency revert procedures, and agent scheduling.
+**DeployGuard adaptations**: `.cursor/rules/01-komatik-agents.mdc` — branch differences (`main` not `dev`), repo-specific CI commands, trust levels for this codebase.
+**Source of truth**: `dschirmer-shiftkey/komatik-agents` (private). Project tracking in `projects/deployguard/STATUS.md`, `ROADMAP.md`, `RESEARCH.md`.
 
-### Agents that interact with this repo
+### Agent branch patterns
 
-| Agent (codename)          | What it does here                                              |
-| ------------------------- | -------------------------------------------------------------- |
-| Orbit (satellite-watcher) | Scans CI status, open PRs, issues every 12h. Writes STATUS.md  |
-| Sentinel (security-qa)    | Daily security audit. May flag vulnerabilities or open fix PRs |
-| Pixel (frontend-dev)      | Implements features/fixes assigned by coordinator              |
-| Harbor (release-mgr)      | Creates PRs, manages git ops, handles merges                   |
-| Relay (pipeline-ops)      | Monitors CI health, may fix pipeline issues                    |
-| Koda (coordinator)        | Triages findings into tasks, creates multi-agent workflows     |
+| Pattern | Origin |
+| ------- | ------ |
+| `claude/<two-word-slug>` | Claude Code session on NUC |
+| `agent/<agent-id>/<description>` | OpenClaw scheduled agent |
+| `cursor/<description>-<4-char-hex>` | Cursor session on NUC |
+| `cursor/<description>` (no hex) | Probably local Cursor (David) |
 
-### Human-in-the-loop
+### Key rule
 
-David's Cursor sessions are the **final review gate**. Agent PRs use branch pattern `agent/<agent-name>/<description>` and must be reviewed locally before merge. See `.cursor/skills/review-agent-pr/SKILL.md` for the full review procedure.
-
-### Git conventions (agents)
-
-- Branch: `agent/<agent-name>/<short-description>`
-- Target: `main` (agents should never push directly to `main`)
-- Commits: conventional format (`<type>(<scope>): <description>`)
+**Check before you build. Review before you merge. Test before you push.** Agent PRs must pass the 10-point security checklist and local CI verification before merge. See `.cursor/skills/review-agent-pr/SKILL.md` for the review procedure.
 
 ## Quick file map
 
