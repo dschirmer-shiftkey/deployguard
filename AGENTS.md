@@ -12,6 +12,32 @@ DeployGuard is a GitHub Action (current release **v3.0.0**, floating tag **`v3`*
 4. **Test healer proposes, developer approves** — self-healing changes are suggestions (e.g. PR comments), never force-pushed.
 5. **Shared risk engine** — `src/risk-engine.ts` is the canonical scoring implementation; MCP and app MUST use copies of this file (prebuild copy), not independent implementations.
 
+## Dependencies
+
+| Package           | Version | Notes                                         |
+| ----------------- | ------- | --------------------------------------------- |
+| `@actions/core`   | 2.0.3   | Action toolkit (getInput, setOutput, summary) |
+| `@actions/github` | 9.1.0   | Octokit + context (ESM-only since v9)         |
+| `zod`             | 3.24+   | Schema validation for types and config        |
+| `undici`          | 6.24.1  | Transitive via @actions/\*; all CVEs resolved |
+
+## Build toolchain
+
+- **Bundler**: `@vercel/ncc` → single CJS file at `dist/index.js`.
+- **TypeScript**: `moduleResolution: "Bundler"`, `module: "ESNext"` — matches the ncc pipeline; required because `@actions/github@9` ships ESM-only exports.
+- **Linting**: ESLint + typescript-eslint + Prettier (CI enforces `format:check` before lint).
+- **Testing**: Vitest (279 tests across 10 files).
+
+## CI pipeline
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR:
+
+1. `npm run format:check` — Prettier
+2. `npm run lint` — ESLint + `tsc --noEmit`
+3. `npm test` — Vitest
+4. `npm run build` — ncc bundle
+5. `git diff --exit-code dist/` — verifies committed `dist/` matches fresh build
+
 ## Conventions
 
 - GitHub Action contract: **`action.yml`** ↔ **`src/main.ts`** (inputs/outputs must stay in sync).
@@ -19,6 +45,7 @@ DeployGuard is a GitHub Action (current release **v3.0.0**, floating tag **`v3`*
 - **`src/risk-engine.ts`** — pure module with no `@actions/*` deps, shared via prebuild copy to `mcp/src/` and `app/src/` (gitignored).
 - **`app/`** and **`mcp/`** are separate TypeScript projects (eslint-ignored at repo root); match their local patterns when editing.
 - **`cli/`** — ESM wizard; run `cd cli && npx tsc` after edits; **`cli/dist/`** is gitignored (build before npm publish).
+- Always run `npm run format` before committing — CI will reject unformatted code.
 
 ## Architecture (v3)
 

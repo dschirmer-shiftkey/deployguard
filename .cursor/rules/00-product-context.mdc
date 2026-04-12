@@ -1,5 +1,5 @@
 ---
-description: DeployGuard product context and guardrails (v2.2+)
+description: DeployGuard product context and guardrails (v3.0+)
 globs:
   - "**/*"
 ---
@@ -8,10 +8,10 @@ globs:
 
 ## What this is
 
-- **DeployGuard** — GitHub Action at **`@v2`** (v2.2.x): PR risk scoring, health checks, optional **DORA** metrics, **OpenTelemetry** export, evaluation **store** (HTTP + optional Supabase fallback).
+- **DeployGuard** — GitHub Action at **`@v3`** (v3.0.x): PR risk scoring (10 weighted factors via shared risk engine), health checks, **security signals** (Code Scanning / SARIF), **canary** deploy outcome tracking, **DORA-5** metrics, **OpenTelemetry** export, evaluation **store** (HTTP + optional Supabase fallback).
 - **CLI** — `cli/`: `npx deployguard init` generates `.deployguard.yml` + workflow YAML.
-- **MCP** — `mcp/`: standalone tools for agents.
-- **App** — `app/`: optional GitHub App for deployment protection rules.
+- **MCP** — `mcp/`: 12 standalone tools for AI agents (uses shared `risk-engine.ts`).
+- **App** — `app/`: optional GitHub App for deployment protection rules (uses shared `risk-engine.ts`).
 
 ## Before large edits
 
@@ -24,13 +24,20 @@ Read **`AGENTS.md`**, **`README.md`**, and **`action.yml`**. If you change input
 3. **No full source persistence** — evaluations are metadata/scores; optional external store.
 4. **Healers** — suggestions only, never auto-commit.
 5. **Exhaustive `GateDecision`** switches (use `never`).
+6. **Shared risk engine** — `src/risk-engine.ts` is canonical; MCP and app use prebuild copies.
+
+## Key dependencies
+
+- `@actions/core@2.0.3`, `@actions/github@9.1.0` (ESM-only), `zod@3.24+`, `undici@6.24.1` (transitive, 0 CVEs).
+- `tsconfig.json`: `moduleResolution: "Bundler"` / `module: "ESNext"` — required for @actions/github v9 ESM exports + ncc bundler.
 
 ## Storage edge cases
 
-HTTP **evaluation store** behind **Vercel bot protection** often returns HTML → document **`VERCEL_AUTOMATION_BYPASS_SECRET`** or rely on **`SUPABASE_URL`** + **`SUPABASE_SERVICE_ROLE_KEY`** fallback (`src/notify.ts`).
+HTTP **evaluation store** behind **Vercel bot protection** often returns HTML → use **`VERCEL_AUTOMATION_BYPASS_SECRET`** or rely on **`SUPABASE_URL`** + **`SUPABASE_SERVICE_ROLE_KEY`** fallback (`src/notify.ts`).
 
 ## Verification
 
-- `npm test` — Vitest
+- `npm run format` — Prettier (CI rejects unformatted code)
+- `npm test` — Vitest (279 tests, 10 files)
 - `npm run build` — refresh `dist/index.js`
-- `npm run lint` — ESLint + `tsc` (root); `cd cli && npx tsc` after CLI edits
+- `npm run lint` — ESLint + `tsc --noEmit` (root); `cd cli && npx tsc` after CLI edits

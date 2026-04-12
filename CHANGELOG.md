@@ -2,6 +2,25 @@
 
 All notable changes to DeployGuard will be documented in this file.
 
+## [3.0.1] - 2026-04-12
+
+### Security
+
+- **Resolved 5 undici CVEs** by upgrading `@actions/core` 1.11.1 → 2.0.3 and `@actions/github` 6.0.1 → 9.1.0 (moves `undici` from 5.29.0 → 6.24.1).
+  - GHSA-g9mf-h72j-4rw9 — unbounded decompression chain (moderate)
+  - GHSA-2mjp-6q6p-2qxm — HTTP request/response smuggling (moderate)
+  - GHSA-vrm6-8vpv-qv8q — unbounded WebSocket memory consumption (high)
+  - GHSA-v9p9-hfj2-hcw8 — unhandled WebSocket exception (high)
+  - GHSA-4992-7rv2-5pvq — CRLF injection via upgrade option (moderate)
+
+### Changed
+
+- `tsconfig.json` switched to `moduleResolution: "Bundler"` / `module: "ESNext"` to accommodate `@actions/github@9` ESM-only exports (ncc handles the ESM→CJS conversion at build time).
+
+### Fixed
+
+- CI pipeline failures caused by unformatted source files and stale `dist/index.js`.
+
 ## [3.0.0] - 2026-04-10
 
 ### Architecture

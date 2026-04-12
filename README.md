@@ -53,6 +53,7 @@ DeployGuard analyzes every pull request and produces a **risk score** (0-100) ba
 | `test_coverage`      | 2      | Ratio of test files to source files in the PR                                                       |
 | `dependency_changes` | 2      | Whether dependency manifests or lockfiles were modified                                             |
 | `deployment_history` | 2      | Recent deployment failures in the target environment                                                |
+| `canary_status`      | 2      | Deploy outcome signals from canary/progressive rollouts                                             |
 | `author_history`     | 1      | How familiar the author is with the repo (90-day commit count)                                      |
 | `pr_age`             | 1      | How long the PR has been open (stale PRs carry more risk)                                           |
 
