@@ -6,8 +6,8 @@ globs:
 
 # DeployGuard — Komatik HQ Adaptations
 
-> The full protocol lives in `.cursor/rules/KOMATIK-HQ-PROMPT.md`. This file
-> documents only what differs for the DeployGuard repo.
+> The full HQ protocol lives in `AGENTS.md` (auto-distributed from Komatik hub).
+> This file documents only what differs for the DeployGuard repo.
 
 ## Branch differences
 

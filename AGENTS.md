@@ -57,7 +57,6 @@ Check for existing HQ review results before duplicating that work.
 
 ## The HQ Agent Team
 
-
 | Codename      | Agent ID          | Role                                                        | Risk Level                    |
 | ------------- | ----------------- | ----------------------------------------------------------- | ----------------------------- |
 | **Koda**      | coordinator       | Chief of Staff — delegation, briefings, strategic oversight | LOW (orchestration only)      |
@@ -77,7 +76,6 @@ Check for existing HQ review results before duplicating that work.
 | **Edison**    | rd-platform       | R&D platform research                                       | LOW (research)                |
 | **Tesla**     | rd-satellite      | R&D satellite product research                              | LOW (research)                |
 | **Beacon**    | marketing         | Marketing, growth, content, SEO tracking                    | LOW (content)                 |
-
 
 ### Monitored Repositories (11+)
 
@@ -104,7 +102,6 @@ be creating PRs against it:
 
 HQ agents create branches with these naming patterns. Learn to recognize them:
 
-
 | Pattern                                | Origin                            | Example                                         |
 | -------------------------------------- | --------------------------------- | ----------------------------------------------- |
 | `claude/<two-word-slug>`               | Claude Code session on NUC        | `claude/keen-bell`, `claude/flamboyant-faraday` |
@@ -112,8 +109,7 @@ HQ agents create branches with these naming patterns. Learn to recognize them:
 | `cursor/<description>-<4-char-hex>`    | Cursor session on NUC             | `cursor/deployguard-logic-issues-5ef5`          |
 | `cursor/<description>` (no hex suffix) | **Probably YOUR local workspace** | `cursor/promote-dev-to-staging`                 |
 
-
-**Ambiguity warning**: Both local workspaces and the NUC create `cursor/`* branches. To
+**Ambiguity warning**: Both local workspaces and the NUC create `cursor/`\* branches. To
 confirm origin, check the commit author:
 
 ```bash
@@ -246,7 +242,6 @@ A single failure at BLOCKING severity = **reject the PR**.
 10. **Import resolution** — MEDIUM
     New imports must resolve: `git ls-tree -r origin/dev --name-only` to verify imported files exist
 
-
 #### Step 3: Check CI status
 
 ```bash
@@ -347,10 +342,12 @@ If you discover an agent merged harmful code (destructive SQL, auth bypass, secr
 
 1. **Don't panic.** `dev` is not production. `staging` and `master` are protected branches.
 2. **Revert the merge commit immediately:**
-  ```bash
-   git revert <merge-commit-hash> --no-edit
-   git push origin dev
-  ```
+
+```bash
+ git revert <merge-commit-hash> --no-edit
+ git push origin dev
+```
+
 3. **Close any open PRs** from the same agent session to prevent further damage.
 4. **Notify David** — include the PR number, what was destructive, and the revert commit.
 5. **Document the incident** for future reference.
@@ -360,7 +357,6 @@ If you discover an agent merged harmful code (destructive SQL, auth bypass, secr
 ## HQ Infrastructure Reference
 
 These services run on the NUC (accessible via Tailscale VPN at `100.87.31.3`):
-
 
 | Service              | Port  | Purpose                                         |
 | -------------------- | ----- | ----------------------------------------------- |
@@ -388,6 +384,7 @@ table. A polling fallback cron runs every 15 minutes to catch missed events.
 ### GitHub Webhook Integration (MC6 — live as of April 12, 2026)
 
 All 11 project repos have registered webhooks delivering these event types in real-time:
+
 - `push` — branch updates, commits
 - `pull_request` — opened, closed, merged, ready-for-review
 - `check_run` — CI pass/fail
@@ -395,12 +392,12 @@ All 11 project repos have registered webhooks delivering these event types in re
 
 **Automated PR review pipeline**: When a PR is opened or marked ready-for-review, HQ
 spawns a 3-step workflow:
+
 1. **Sentinel** (security-qa) — security scan
 2. **Blueprint** (api-architect) — API contract validation
 3. **Harbor** (release-mgr) — release readiness check
 
 These review results are visible via `query_events` or the dashboard Activity feed.
-
 
 ---
 
@@ -408,22 +405,20 @@ These review results are visible via `query_events` or the dashboard Activity fe
 
 The agents run on cron schedules. All times are **US Pacific (PT)** — the NUC timezone.
 
-
-| Time (PT) | Agent                     | Activity                                   |
-| --------- | ------------------------- | ------------------------------------------ |
-| 02:00     | Relay (pipeline-ops)      | Pipeline health check                      |
-| 02:30     | Vault (infra-ops)         | Migration drift detection + DB health      |
-| 06:00     | Tracker (knowledge-scout) | Research sweep (npm, PyPI, GitHub, MCP)    |
-| 07:00     | Orbit (satellite-watcher) | Cross-repo status check                    |
-| 08:00     | Relay (pipeline-ops)      | Pipeline health check                      |
-| 09:00     | Koda (coordinator)        | **Morning briefing**                       |
-| 10:00     | Pixel + Blueprint + others| **Dev sprint** (workflow step execution)   |
-| 12:00     | Sentinel (security-qa)    | Security scan                              |
-| 15:00     | Tracker (knowledge-scout) | Afternoon research sweep                   |
-| 17:00     | Orbit (satellite-watcher) | Afternoon repo scan                        |
-| 18:00     | Koda (coordinator)        | **Evening wrap-up**                        |
-| 22:00     | Pixel (frontend-dev)      | Overnight dependency updates + issue fixes |
-
+| Time (PT) | Agent                      | Activity                                   |
+| --------- | -------------------------- | ------------------------------------------ |
+| 02:00     | Relay (pipeline-ops)       | Pipeline health check                      |
+| 02:30     | Vault (infra-ops)          | Migration drift detection + DB health      |
+| 06:00     | Tracker (knowledge-scout)  | Research sweep (npm, PyPI, GitHub, MCP)    |
+| 07:00     | Orbit (satellite-watcher)  | Cross-repo status check                    |
+| 08:00     | Relay (pipeline-ops)       | Pipeline health check                      |
+| 09:00     | Koda (coordinator)         | **Morning briefing**                       |
+| 10:00     | Pixel + Blueprint + others | **Dev sprint** (workflow step execution)   |
+| 12:00     | Sentinel (security-qa)     | Security scan                              |
+| 15:00     | Tracker (knowledge-scout)  | Afternoon research sweep                   |
+| 17:00     | Orbit (satellite-watcher)  | Afternoon repo scan                        |
+| 18:00     | Koda (coordinator)         | **Evening wrap-up**                        |
+| 22:00     | Pixel (frontend-dev)       | Overnight dependency updates + issue fixes |
 
 Heaviest autonomous coding activity happens overnight (22:00–06:00 PT). Expect the most
 PRs and merges to accumulate during this window.
@@ -443,22 +438,20 @@ When your work conflicts with agent-created work:
 
 ## Quick Reference Card
 
-
-| Situation                       | What to Do                                                   |
-| ------------------------------- | ------------------------------------------------------------ |
+| Situation                       | What to Do                                                                       |
+| ------------------------------- | -------------------------------------------------------------------------------- |
 | Starting a new session          | Fetch origin, check how far behind dev, check open agent PRs, check events table |
-| Starting a new feature          | Search PRs + branches for keyword overlap first              |
-| Open agent PR exists            | Check if HQ auto-review ran (`query_events`), then apply 10-point checklist |
-| Agent PR has BLOCKING issue     | Request changes with specific fix instructions               |
-| Agent merged bad code to dev    | `git revert <hash> --no-edit && git push origin dev`         |
-| 3+ agent PRs merged in <1 hour  | Spot-check middle PRs, run full test suite                   |
-| Agent branch but no PR          | Inspect diff — adopt if useful, ignore if stale              |
-| Agent touched same files as you | Check for conflicts before committing your work              |
-| Promoting dev → staging         | Review ALL agent merges since last promotion                 |
-| Schema migration from agent     | **ALWAYS full line-by-line review** — never auto-merge       |
-| CI failure in events table      | Check if pipeline-ops is already handling it before acting   |
-| Unsure about agent code quality | When in doubt, request changes. Better safe than sorry.      |
-
+| Starting a new feature          | Search PRs + branches for keyword overlap first                                  |
+| Open agent PR exists            | Check if HQ auto-review ran (`query_events`), then apply 10-point checklist      |
+| Agent PR has BLOCKING issue     | Request changes with specific fix instructions                                   |
+| Agent merged bad code to dev    | `git revert <hash> --no-edit && git push origin dev`                             |
+| 3+ agent PRs merged in <1 hour  | Spot-check middle PRs, run full test suite                                       |
+| Agent branch but no PR          | Inspect diff — adopt if useful, ignore if stale                                  |
+| Agent touched same files as you | Check for conflicts before committing your work                                  |
+| Promoting dev → staging         | Review ALL agent merges since last promotion                                     |
+| Schema migration from agent     | **ALWAYS full line-by-line review** — never auto-merge                           |
+| CI failure in events table      | Check if pipeline-ops is already handling it before acting                       |
+| Unsure about agent code quality | When in doubt, request changes. Better safe than sorry.                          |
 
 ---
 
@@ -539,28 +532,115 @@ Runtime state lives in PostgreSQL, not in git-committed files.
 ## Infrastructure Changes (distributed 2026-04-12)
 
 ### Branch Protection (all 13 repos)
+
 - **main/master**: Protected — requires PR + 1 approval, no force push
 - **staging**: New branch, protected — requires PR + 1 approval
 - **dev**: Semi-protected — no force push, no branch deletion
 - Flow: `agent/* / claude/*` → `dev` → `staging` → `main/master`
 
 ### CI Safety Gates (org-level shared workflows)
+
 - **agent-pr-lint** — blocks agent PRs with destructive SQL, secrets, missing RLS
 - **promote-gate** — build/test gate for staging/production promotions
 - **deployguard-check** — deployment risk assessment
 
 ### Supabase Staging Environment
+
 - Staging project: `komatik-staging` (ref: `lwelkeqcmxbszdqqaonr`)
 - Production: `sdmfolczsaqiyararqwh` (unchanged)
 
 ### Standard Labels (all repos)
+
 `agent-authored`, `needs-review`, `migration`, `cross-repo`,
 `hq-coordination`, `promotion-ready`, `security`, `rapid-fire`
 
 ---
 
-## Project-Specific
+## Project-Specific — DeployGuard
 
+<!-- These sections are preserved across HQ re-distributions -->
 
-<!-- Add project-specific Claude Code instructions below this line -->
-<!-- These sections are preserved across re-distributions -->
+### What this project is
+
+DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`**) that scores pull request risk, checks production health, integrates **security signals** (Code Scanning / SARIF), computes **DORA-5** metrics, tracks deployment outcomes via **canary hooks**, exports **OpenTelemetry** spans, and blocks dangerous releases. It also ships a **`deployguard init`** CLI, an optional **GitHub App** (`app/`) for deployment protection rules, and a standalone **MCP server** (`mcp/`) with 12 tools for AI agents.
+
+### Hard rules (do not regress)
+
+1. **Fail-open default** — if DeployGuard errors in normal operation, deployments proceed with a warning (unless `fail-mode: closed`). Store/webhook/OTel failures are non-blocking with visible warnings.
+2. **Minimal GitHub permissions** — read PRs, read code, write checks/comments/labels as documented. No write access to repository code from the gate itself.
+3. **No source code storage** — risk scoring analyzes diffs in-memory. Persisted evaluation payloads contain scores/metadata only.
+4. **Test healer proposes, developer approves** — self-healing changes are suggestions (e.g. PR comments), never force-pushed.
+5. **Shared risk engine** — `src/risk-engine.ts` is the canonical scoring implementation; MCP and app MUST use copies (prebuild copy), not independent implementations.
+
+### Dependencies
+
+| Package           | Version | Notes                                         |
+| ----------------- | ------- | --------------------------------------------- |
+| `@actions/core`   | 2.0.3   | Action toolkit (getInput, setOutput, summary) |
+| `@actions/github` | 9.1.0   | Octokit + context (ESM-only since v9)         |
+| `zod`             | 3.24+   | Schema validation for types and config        |
+| `undici`          | 6.24.1  | Transitive via @actions/\*; all CVEs resolved |
+
+### Build toolchain
+
+- **Bundler**: `@vercel/ncc` → single CJS file at `dist/index.js`.
+- **TypeScript**: `moduleResolution: "Bundler"`, `module: "ESNext"` — required because `@actions/github@9` ships ESM-only exports.
+- **Linting**: ESLint + typescript-eslint + Prettier (CI enforces `format:check` before lint).
+- **Testing**: Vitest (346 tests across 11 files).
+
+### CI pipeline
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR:
+
+1. `npm run format:check` — Prettier
+2. `npm run lint` — ESLint + `tsc --noEmit`
+3. `npm test` — Vitest
+4. `npm run build` — ncc bundle
+5. `git diff --exit-code dist/` — verifies committed `dist/` matches fresh build
+
+**Note**: This repo uses `main` (not `dev`). Substitute `main` wherever the HQ protocol says `dev`.
+
+### Conventions
+
+- GitHub Action contract: **`action.yml`** ↔ **`src/main.ts`** (inputs/outputs must stay in sync).
+- Action runtime bundle: **`src/`** → **`dist/index.js`** via `@vercel/ncc` (`npm run build`).
+- **`src/risk-engine.ts`** — pure module with no `@actions/*` deps, shared via prebuild copy to `mcp/src/` and `app/src/`.
+- **`app/`** and **`mcp/`** are separate TypeScript projects; match their local patterns when editing.
+- **`cli/`** — ESM wizard; run `cd cli && npx tsc` after edits.
+- Always run `npm run format` before committing — CI will reject unformatted code.
+
+### Risk factors (10 types)
+
+| Factor               | Weight | Source            |
+| -------------------- | ------ | ----------------- |
+| `security_alerts`    | 4      | Code Scanning API |
+| `code_churn`         | 3      | PR file diff      |
+| `sensitive_files`    | 3      | PR file patterns  |
+| `file_count`         | 2      | PR file count     |
+| `test_coverage`      | 2      | PR file analysis  |
+| `dependency_changes` | 2      | PR file names     |
+| `deployment_history` | 2      | Supabase/API      |
+| `canary_status`      | 2      | Deploy webhooks   |
+| `author_history`     | 1      | GitHub API        |
+| `pr_age`             | 1      | GitHub API        |
+
+### Quick file map
+
+| Path                 | Purpose                                             |
+| -------------------- | --------------------------------------------------- |
+| `action.yml`         | Action inputs/outputs definition                    |
+| `src/risk-engine.ts` | **Shared** pure risk scoring (no @actions deps)     |
+| `src/gate.ts`        | Gate evaluation, health checks, GitHub interactions |
+| `src/security.ts`    | Code Scanning API + security risk factor            |
+| `src/canary.ts`      | Deploy outcome webhooks + history tracking          |
+| `src/dora.ts`        | DORA-5 metrics computation                          |
+| `src/main.ts`        | Action entry point                                  |
+| `src/types.ts`       | Zod schemas + TypeScript types                      |
+| `src/config.ts`      | `.deployguard.yml` parser                           |
+| `src/notify.ts`      | Webhook + evaluation store                          |
+| `src/otel.ts`        | OpenTelemetry span export                           |
+| `mcp/src/server.ts`  | MCP server (12 tools)                               |
+| `app/src/handler.ts` | GitHub App webhook handler                          |
+| `app/src/server.ts`  | Hono HTTP server                                    |
+| `cli/src/index.ts`   | `deployguard init` wizard                           |
+| `src/__tests__/`     | Vitest test suite (346 tests)                       |
