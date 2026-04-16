@@ -33,6 +33,9 @@ vi.mock("@actions/github", () => ({
             },
           ],
         }),
+        listCommits: vi.fn().mockResolvedValue({
+          data: [{ sha: "pr-commit-1", commit: { message: "feat: add feature" } }],
+        }),
         get: vi.fn().mockResolvedValue({
           data: {
             user: { login: "test-author" },
