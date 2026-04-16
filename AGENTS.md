@@ -592,6 +592,7 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 3. **No source code storage** — risk scoring analyzes diffs in-memory. Persisted evaluation payloads contain scores/metadata only.
 4. **Test healer proposes, developer approves** — self-healing changes are suggestions (e.g. PR comments), never force-pushed.
 5. **Shared risk engine** — `src/risk-engine.ts` is the canonical scoring implementation; MCP and app MUST use copies (prebuild copy), not independent implementations.
+6. **Merge-base drift protection** — `fetchPrFiles` cross-checks GitHub's `pulls.listFiles` against commit-level files when >30 files reported; falls back to commit-derived list when API count exceeds 2x actual. Applied to Action, App, and MCP server.
 
 ### Dependencies
 
@@ -664,4 +665,4 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 | `app/src/handler.ts` | GitHub App webhook handler                          |
 | `app/src/server.ts`  | Hono HTTP server                                    |
 | `cli/src/index.ts`   | `deployguard init` wizard                           |
-| `src/__tests__/`     | Vitest test suite (346 tests)                       |
+| `src/__tests__/`     | Vitest test suite (401 tests, 14 files)             |
