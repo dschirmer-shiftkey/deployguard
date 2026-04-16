@@ -8,6 +8,7 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
+  security-events: read
 
 jobs:
   gate:
@@ -37,6 +38,8 @@ jobs:
           risk-threshold: "85"
           warn-threshold: "50"
           fail-mode: "open"
+          dora-metrics: "true"
+          security-gate: "true"
 
       - name: Print outputs
         if: always()
@@ -45,6 +48,10 @@ jobs:
           echo "risk-score:    ${{ steps.gate.outputs.risk-score }}"
           echo "health-score:  ${{ steps.gate.outputs.health-score }}"
           echo "report-url:    ${{ steps.gate.outputs.report-url }}"
+          echo "dora-rating:   ${{ steps.gate.outputs.dora-rating }}"
           echo ""
           echo "--- evaluation-json (truncated) ---"
           echo '${{ steps.gate.outputs.evaluation-json }}' | head -c 500
+          echo ""
+          echo "--- dora-json (truncated) ---"
+          echo '${{ steps.gate.outputs.dora-json }}' | head -c 500

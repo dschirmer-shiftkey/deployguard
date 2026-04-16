@@ -1,0 +1,8 @@
+# Ensure consistent line endings across platforms.
+# The ncc bundle and source files must stay LF to pass CI's
+# `git diff --exit-code dist/` check on all platforms.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.jpg binary
+*.gif binary
