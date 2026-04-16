@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeployGuard Dashboard</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #0d1117;
+        --surface: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-muted: #8b949e;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --yellow: #d29922;
+        --red: #f85149;
+        --radius: 8px;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+        padding: 24px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .subtitle {
+        color: var(--text-muted);
+        font-size: 0.875rem;
+        margin-bottom: 24px;
+      }
+      .config-bar {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        align-items: end;
+      }
+      .config-bar label {
+        display: flex;
+        flex-direction: column;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        gap: 4px;
+      }
+      .config-bar input,
+      .config-bar select {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+        font-size: 0.875rem;
+        min-width: 200px;
+      }
+      .config-bar button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: var(--radius);
+        padding: 8px 16px;
+        font-size: 0.875rem;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .config-bar button:hover {
+        opacity: 0.9;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .stat-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+      }
+      .stat-label {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        margin-top: 4px;
+      }
+      .stat-sub {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+      .allow {
+        color: var(--green);
+      }
+      .warn {
+        color: var(--yellow);
+      }
+      .block {
+        color: var(--red);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        font-size: 0.875rem;
+      }
+      thead {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      th {
+        text-align: left;
+        padding: 10px 14px;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      td {
+        padding: 10px 14px;
+        border-top: 1px solid var(--border);
+      }
+      tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+      .badge-allow {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--green);
+      }
+      .badge-warn {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--yellow);
+      }
+      .badge-block {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--red);
+      }
+      .score-bar {
+        width: 100px;
+        height: 6px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+      .score-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 48px 24px;
+        color: var(--text-muted);
+      }
+      .chart-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .chart-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+      }
+      .chart-card h3 {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+      }
+      .bar-chart {
+        display: flex;
+        align-items: end;
+        gap: 4px;
+        height: 80px;
+      }
+      .bar {
+        flex: 1;
+        border-radius: 2px 2px 0 0;
+        min-width: 8px;
+        transition: height 0.3s ease;
+      }
+      @media (max-width: 768px) {
+        .chart-row {
+          grid-template-columns: 1fr;
+        }
+        .config-bar input {
+          min-width: 150px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DeployGuard Dashboard</h1>
+    <p class="subtitle">Evaluation history and deployment health overview</p>
+
+    <div class="config-bar">
+      <label>
+        Supabase URL
+        <input type="text" id="supabaseUrl" placeholder="https://xxx.supabase.co" />
+      </label>
+      <label>
+        Anon Key
+        <input type="password" id="anonKey" placeholder="eyJ..." />
+      </label>
+      <label>
+        Window
+        <select id="window">
+          <option value="7">7 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="90">90 days</option>
+        </select>
+      </label>
+      <button onclick="loadData()">Load</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="chart-row" id="charts"></div>
+
+    <table id="evalTable" style="display: none">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Repo</th>
+          <th>Commit</th>
+          <th>Risk</th>
+          <th>Health</th>
+          <th>Decision</th>
+          <th>Environment</th>
+          <th>Outcome</th>
+        </tr>
+      </thead>
+      <tbody id="evalBody"></tbody>
+    </table>
+
+    <div class="empty-state" id="emptyState">
+      Enter your Supabase credentials above and click <strong>Load</strong> to view
+      evaluations.
+    </div>
+
+    <script>
+      function scoreColor(score) {
+        if (score > 70) return "var(--red)";
+        if (score > 55) return "var(--yellow)";
+        return "var(--green)";
+      }
+
+      function decisionBadge(decision) {
+        const cls =
+          decision === "allow"
+            ? "badge-allow"
+            : decision === "warn"
+              ? "badge-warn"
+              : "badge-block";
+        return `<span class="badge ${cls}">${(decision || "—").toUpperCase()}</span>`;
+      }
+
+      function scoreBar(score) {
+        const color = scoreColor(score);
+        return `<span class="score-bar"><span class="score-bar-fill" style="width:${score}%;background:${color}"></span></span>${score}`;
+      }
+
+      function relativeTime(dateStr) {
+        const diff = Date.now() - new Date(dateStr).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
+      }
+
+      async function loadData() {
+        const url = document.getElementById("supabaseUrl").value.trim();
+        const key = document.getElementById("anonKey").value.trim();
+        const windowDays = parseInt(document.getElementById("window").value, 10);
+
+        if (!url || !key) {
+          alert("Please enter Supabase URL and Anon Key");
+          return;
+        }
+
+        localStorage.setItem("dg_url", url);
+        localStorage.setItem("dg_key", key);
+
+        const since = new Date(Date.now() - windowDays * 86400000).toISOString();
+        const endpoint =
+          `${url}/rest/v1/deployguard_evaluations` +
+          `?select=*` +
+          `&created_at=gte.${since}` +
+          `&order=created_at.desc` +
+          `&limit=200`;
+
+        try {
+          const res = await fetch(endpoint, {
+            headers: {
+              apikey: key,
+              Authorization: `Bearer ${key}`,
+              Accept: "application/json",
+            },
+          });
+
+          if (!res.ok) {
+            alert(`API error: ${res.status}`);
+            return;
+          }
+
+          const rows = await res.json();
+          renderDashboard(rows, windowDays);
+        } catch (err) {
+          alert(`Fetch failed: ${err.message}`);
+        }
+      }
+
+      function renderDashboard(rows, windowDays) {
+        document.getElementById("emptyState").style.display =
+          rows.length === 0 ? "block" : "none";
+        document.getElementById("evalTable").style.display =
+          rows.length > 0 ? "" : "none";
+
+        const total = rows.length;
+        const allows = rows.filter((r) => r.gate_decision === "allow").length;
+        const warns = rows.filter((r) => r.gate_decision === "warn").length;
+        const blocks = rows.filter((r) => r.gate_decision === "block").length;
+        const avgRisk =
+          total > 0
+            ? Math.round(rows.reduce((s, r) => s + (r.risk_score || 0), 0) / total)
+            : 0;
+        const avgHealth =
+          total > 0
+            ? Math.round(rows.reduce((s, r) => s + (r.health_score || 100), 0) / total)
+            : 100;
+        const deployed = rows.filter((r) => r.deploy_outcome === "success").length;
+        const failed = rows.filter((r) => r.deploy_outcome === "failure").length;
+        const cfr =
+          deployed + failed > 0 ? Math.round((failed / (deployed + failed)) * 100) : 0;
+
+        document.getElementById("stats").innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">Evaluations</div>
+          <div class="stat-value">${total}</div>
+          <div class="stat-sub">${windowDays}-day window</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Risk Score</div>
+          <div class="stat-value" style="color:${scoreColor(avgRisk)}">${avgRisk}</div>
+          <div class="stat-sub">of 100</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Health</div>
+          <div class="stat-value allow">${avgHealth}</div>
+          <div class="stat-sub">of 100</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Decisions</div>
+          <div class="stat-value"><span class="allow">${allows}</span> / <span class="warn">${warns}</span> / <span class="block">${blocks}</span></div>
+          <div class="stat-sub">allow / warn / block</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Change Failure Rate</div>
+          <div class="stat-value" style="color:${cfr > 15 ? "var(--red)" : cfr > 5 ? "var(--yellow)" : "var(--green)"}">${cfr}%</div>
+          <div class="stat-sub">${failed} failures / ${deployed + failed} deploys</div>
+        </div>
+      `;
+
+        const dayBuckets = {};
+        for (const r of rows) {
+          const day = r.created_at.substring(0, 10);
+          if (!dayBuckets[day])
+            dayBuckets[day] = { risk: [], decisions: { allow: 0, warn: 0, block: 0 } };
+          dayBuckets[day].risk.push(r.risk_score || 0);
+          const dec = r.gate_decision || "allow";
+          if (dayBuckets[day].decisions[dec] !== undefined)
+            dayBuckets[day].decisions[dec]++;
+        }
+
+        const sortedDays = Object.keys(dayBuckets).sort().slice(-14);
+        const maxRisk = Math.max(
+          ...sortedDays.map(
+            (d) =>
+              dayBuckets[d].risk.reduce((a, b) => a + b, 0) / dayBuckets[d].risk.length,
+          ),
+          1,
+        );
+        const maxDecisions = Math.max(
+          ...sortedDays.map(
+            (d) =>
+              dayBuckets[d].decisions.allow +
+              dayBuckets[d].decisions.warn +
+              dayBuckets[d].decisions.block,
+          ),
+          1,
+        );
+
+        const riskBars = sortedDays
+          .map((d) => {
+            const avg = Math.round(
+              dayBuckets[d].risk.reduce((a, b) => a + b, 0) / dayBuckets[d].risk.length,
+            );
+            const pct = (avg / 100) * 100;
+            return `<div class="bar" style="height:${pct}%;background:${scoreColor(avg)}" title="${d}: ${avg}"></div>`;
+          })
+          .join("");
+
+        const decBars = sortedDays
+          .map((d) => {
+            const dd = dayBuckets[d].decisions;
+            const total = dd.allow + dd.warn + dd.block;
+            const pct = (total / maxDecisions) * 100;
+            return `<div class="bar" style="height:${pct}%;background:var(--accent)" title="${d}: ${total} evals"></div>`;
+          })
+          .join("");
+
+        document.getElementById("charts").innerHTML = `
+        <div class="chart-card">
+          <h3>Daily Avg Risk (last 14 days)</h3>
+          <div class="bar-chart">${riskBars}</div>
+        </div>
+        <div class="chart-card">
+          <h3>Daily Evaluations (last 14 days)</h3>
+          <div class="bar-chart">${decBars}</div>
+        </div>
+      `;
+
+        const tbody = document.getElementById("evalBody");
+        tbody.innerHTML = rows
+          .slice(0, 100)
+          .map(
+            (r) => `
+          <tr>
+            <td title="${r.created_at}">${relativeTime(r.created_at)}</td>
+            <td>${r.repo_id || "—"}</td>
+            <td><code>${(r.commit_sha || "").substring(0, 7) || "—"}</code></td>
+            <td>${scoreBar(r.risk_score || 0)}</td>
+            <td>${r.health_score ?? "—"}</td>
+            <td>${decisionBadge(r.gate_decision)}</td>
+            <td>${r.environment || "—"}</td>
+            <td>${r.deploy_outcome ? decisionBadge(r.deploy_outcome === "success" ? "allow" : r.deploy_outcome === "failure" ? "block" : "warn") : "—"}</td>
+          </tr>
+        `,
+          )
+          .join("");
+      }
+
+      const savedUrl = localStorage.getItem("dg_url");
+      const savedKey = localStorage.getItem("dg_key");
+      if (savedUrl) document.getElementById("supabaseUrl").value = savedUrl;
+      if (savedKey) document.getElementById("anonKey").value = savedKey;
+      if (savedUrl && savedKey) loadData();
+    </script>
+  </body>
+</html>

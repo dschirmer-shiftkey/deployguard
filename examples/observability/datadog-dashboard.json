@@ -1,0 +1,356 @@
+{
+  "title": "DeployGuard — Deployment Gate",
+  "description": "Risk scoring, health checks, and gate decisions from DeployGuard OTel spans.",
+  "layout_type": "ordered",
+  "reflow_type": "fixed",
+  "tags": ["service:deployguard", "team:platform"],
+  "template_variables": [
+    {
+      "name": "repository",
+      "prefix": "service.namespace",
+      "default": "*"
+    }
+  ],
+  "widgets": [
+    {
+      "definition": {
+        "title": "Evaluations",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard @deployguard.decision:*" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "count" },
+                "group_by": []
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      },
+      "layout": { "x": 0, "y": 0, "width": 2, "height": 2 }
+    },
+    {
+      "definition": {
+        "title": "Block Rate",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard @deployguard.decision:block" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "count" },
+                "group_by": []
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "conditional_formats": [
+          { "comparator": ">", "value": 0, "palette": "white_on_red" }
+        ]
+      },
+      "layout": { "x": 2, "y": 0, "width": 2, "height": 2 }
+    },
+    {
+      "definition": {
+        "title": "Avg Risk Score",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "avg", "metric": "@deployguard.risk_score" },
+                "group_by": []
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "conditional_formats": [
+          { "comparator": ">", "value": 70, "palette": "white_on_red" },
+          { "comparator": ">", "value": 55, "palette": "white_on_yellow" },
+          { "comparator": "<=", "value": 55, "palette": "white_on_green" }
+        ]
+      },
+      "layout": { "x": 4, "y": 0, "width": 2, "height": 2 }
+    },
+    {
+      "definition": {
+        "title": "Avg Health Score",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard" },
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "avg",
+                  "metric": "@deployguard.health_score"
+                },
+                "group_by": []
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "conditional_formats": [
+          { "comparator": "<", "value": 50, "palette": "white_on_red" },
+          { "comparator": "<", "value": 80, "palette": "white_on_yellow" },
+          { "comparator": ">=", "value": 80, "palette": "white_on_green" }
+        ]
+      },
+      "layout": { "x": 6, "y": 0, "width": 2, "height": 2 }
+    },
+    {
+      "definition": {
+        "title": "p95 Evaluation Time",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard" },
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "pc95",
+                  "metric": "@deployguard.evaluation_ms"
+                },
+                "group_by": []
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "custom_unit": "ms",
+        "conditional_formats": [
+          { "comparator": ">", "value": 15000, "palette": "white_on_red" },
+          { "comparator": ">", "value": 5000, "palette": "white_on_yellow" },
+          { "comparator": "<=", "value": 5000, "palette": "white_on_green" }
+        ]
+      },
+      "layout": { "x": 8, "y": 0, "width": 2, "height": 2 }
+    },
+    {
+      "definition": {
+        "title": "Warn Count",
+        "type": "query_value",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard @deployguard.decision:warn" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "count" },
+                "group_by": []
+              }
+            ]
+          }
+        ],
+        "autoscale": true,
+        "precision": 0,
+        "conditional_formats": [
+          { "comparator": ">", "value": 0, "palette": "white_on_yellow" }
+        ]
+      },
+      "layout": { "x": 10, "y": 0, "width": 2, "height": 2 }
+    },
+    {
+      "definition": {
+        "title": "Gate Decisions Over Time",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              { "formula": "query1", "alias": "allow" },
+              { "formula": "query2", "alias": "warn" },
+              { "formula": "query3", "alias": "block" }
+            ],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard @deployguard.decision:allow" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "count" },
+                "group_by": []
+              },
+              {
+                "data_source": "spans",
+                "name": "query2",
+                "search": { "query": "service:deployguard @deployguard.decision:warn" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "count" },
+                "group_by": []
+              },
+              {
+                "data_source": "spans",
+                "name": "query3",
+                "search": { "query": "service:deployguard @deployguard.decision:block" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "count" },
+                "group_by": []
+              }
+            ],
+            "style": {
+              "palette": "classic",
+              "line_type": "solid",
+              "line_width": "normal"
+            },
+            "display_type": "bars"
+          }
+        ]
+      },
+      "layout": { "x": 0, "y": 2, "width": 6, "height": 4 }
+    },
+    {
+      "definition": {
+        "title": "Risk Score Distribution",
+        "type": "distribution",
+        "requests": [
+          {
+            "query": {
+              "data_source": "spans",
+              "name": "query1",
+              "search": { "query": "service:deployguard" },
+              "indexes": ["*"],
+              "compute": {
+                "metric": "@deployguard.risk_score",
+                "aggregation": "distribution"
+              },
+              "group_by": []
+            }
+          }
+        ]
+      },
+      "layout": { "x": 6, "y": 2, "width": 6, "height": 4 }
+    },
+    {
+      "definition": {
+        "title": "Risk Score by Repository",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [{ "formula": "query1" }],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": { "query": "service:deployguard" },
+                "indexes": ["*"],
+                "compute": { "aggregation": "avg", "metric": "@deployguard.risk_score" },
+                "group_by": [
+                  {
+                    "facet": "resource.service.namespace",
+                    "limit": 10,
+                    "sort": {
+                      "order": "desc",
+                      "aggregation": "avg",
+                      "metric": "@deployguard.risk_score"
+                    }
+                  }
+                ]
+              }
+            ],
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": { "x": 0, "y": 6, "width": 6, "height": 4 }
+    },
+    {
+      "definition": {
+        "title": "Top Risk Factors",
+        "type": "toplist",
+        "requests": [
+          {
+            "formulas": [
+              { "formula": "query1", "limit": { "count": 10, "order": "desc" } }
+            ],
+            "queries": [
+              {
+                "data_source": "spans",
+                "name": "query1",
+                "search": {
+                  "query": "service:deployguard @deployguard.factor.code_churn:>0"
+                },
+                "indexes": ["*"],
+                "compute": {
+                  "aggregation": "avg",
+                  "metric": "@deployguard.factor.code_churn"
+                },
+                "group_by": [
+                  {
+                    "facet": "resource.service.namespace",
+                    "limit": 10,
+                    "sort": {
+                      "order": "desc",
+                      "aggregation": "avg",
+                      "metric": "@deployguard.factor.code_churn"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "layout": { "x": 6, "y": 6, "width": 6, "height": 4 }
+    },
+    {
+      "definition": {
+        "title": "Recent Evaluations",
+        "type": "list_stream",
+        "requests": [
+          {
+            "response_format": "event_list",
+            "query": {
+              "data_source": "spans",
+              "query_string": "service:deployguard",
+              "indexes": ["*"]
+            },
+            "columns": [
+              { "field": "timestamp", "width": "auto" },
+              { "field": "@deployguard.repo", "width": "auto" },
+              { "field": "@deployguard.commit_sha", "width": "auto" },
+              { "field": "@deployguard.decision", "width": "auto" },
+              { "field": "@deployguard.risk_score", "width": "auto" },
+              { "field": "@deployguard.health_score", "width": "auto" },
+              { "field": "@deployguard.evaluation_ms", "width": "auto" }
+            ]
+          }
+        ]
+      },
+      "layout": { "x": 0, "y": 10, "width": 12, "height": 4 }
+    }
+  ]
+}

@@ -13,6 +13,15 @@ import {
   type FileInfo,
   type RiskFactorResult,
 } from "./risk-engine.js";
+import {
+  registerAllAdapters,
+  getAdapter,
+  getAvailableAdapters,
+  runAllAvailable,
+  listAdapterNames,
+} from "./adapters/index.js";
+
+registerAllAdapters();
 
 const HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const VERCEL_TIMEOUT_MS = 10_000;
@@ -42,11 +51,42 @@ const server = new McpServer({
 
 server.tool(
   "check-http-health",
-  "Check the health of an HTTP endpoint by sending a GET request and evaluating the response status",
+  "Check the health of an HTTP endpoint or a named provider. Pass a URL for a raw HTTP probe, or set provider to delegate to a registered adapter (vercel, supabase, aws-ecs, fly-io, cloudflare).",
   {
-    url: z.string().url().describe("The URL to check"),
+    url: z
+      .string()
+      .url()
+      .optional()
+      .describe("The URL to check (omit if using provider)"),
+    provider: z
+      .string()
+      .optional()
+      .describe(
+        "Named provider adapter (vercel, supabase, aws-ecs, fly-io, cloudflare). Overrides url.",
+      ),
   },
-  async ({ url }): Promise<ToolReturn> => {
+  async ({ url, provider }): Promise<ToolReturn> => {
+    if (provider) {
+      const adapter = getAdapter(provider);
+      if (!adapter) {
+        return jsonResult({
+          error: `Unknown provider "${provider}". Available: ${listAdapterNames().join(", ")}`,
+        });
+      }
+      if (!adapter.detect()) {
+        return jsonResult({
+          error: `Provider "${provider}" is not configured — required environment variables are missing`,
+        });
+      }
+      return jsonResult(await adapter.check());
+    }
+
+    if (!url) {
+      return jsonResult({
+        error: "Provide either url or provider parameter",
+      });
+    }
+
     const start = Date.now();
     try {
       const response = await fetch(url, {
@@ -652,6 +692,48 @@ server.tool(
         if (filesRes.ok) {
           files = (await filesRes.json()) as FileInfo[];
         }
+
+        if (files.length > 30) {
+          try {
+            const commitsRes = await fetch(
+              `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=250`,
+              { headers },
+            );
+            if (commitsRes.ok) {
+              const commits = (await commitsRes.json()) as Array<{
+                sha: string;
+              }>;
+              const fileMap = new Map<string, FileInfo>();
+              for (const c of commits) {
+                const detailRes = await fetch(
+                  `https://api.github.com/repos/${owner}/${repo}/commits/${c.sha}`,
+                  { headers },
+                );
+                if (!detailRes.ok) continue;
+                const detail = (await detailRes.json()) as {
+                  files?: Array<{
+                    filename: string;
+                    changes: number;
+                  }>;
+                };
+                for (const f of detail.files ?? []) {
+                  if (!fileMap.has(f.filename)) {
+                    fileMap.set(f.filename, {
+                      filename: f.filename,
+                      changes: f.changes,
+                    });
+                  }
+                }
+              }
+              const commitFiles = Array.from(fileMap.values());
+              if (commitFiles.length > 0 && files.length > commitFiles.length * 2) {
+                files = commitFiles;
+              }
+            }
+          } catch {
+            /* keep API files on cross-check failure */
+          }
+        }
       } catch {
         /* skip */
       }
@@ -988,6 +1070,67 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Health Resource — deployguard://health (DG9: cached aggregate health)
+// ---------------------------------------------------------------------------
+
+let healthCache: { data: unknown; expiresAt: number } | null = null;
+const HEALTH_CACHE_TTL_MS = 60_000;
+
+server.resource(
+  "health",
+  "deployguard://health",
+  { mimeType: "application/json" },
+  async () => {
+    const now = Date.now();
+    if (healthCache && healthCache.expiresAt > now) {
+      return {
+        contents: [
+          {
+            uri: "deployguard://health",
+            mimeType: "application/json",
+            text: JSON.stringify(healthCache.data, null, 2),
+          },
+        ],
+      };
+    }
+
+    const available = getAvailableAdapters();
+    const checks = await runAllAvailable();
+
+    const healthScore =
+      checks.length > 0
+        ? Math.round(
+            checks.reduce(
+              (sum, c) =>
+                sum + (c.status === "healthy" ? 100 : c.status === "degraded" ? 50 : 0),
+              0,
+            ) / checks.length,
+          )
+        : 100;
+
+    const data = {
+      timestamp: new Date().toISOString(),
+      healthScore,
+      adapters: available.map((a) => a.name),
+      checks,
+      cacheTtlMs: HEALTH_CACHE_TTL_MS,
+    };
+
+    healthCache = { data, expiresAt: now + HEALTH_CACHE_TTL_MS };
+
+    return {
+      contents: [
+        {
+          uri: "deployguard://health",
+          mimeType: "application/json",
+          text: JSON.stringify(data, null, 2),
+        },
+      ],
+    };
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Server Card (metadata)
 // ---------------------------------------------------------------------------
 
@@ -1003,7 +1146,7 @@ server.resource(
         text: JSON.stringify(
           {
             name: "deployguard",
-            version: "3.0.0",
+            version: "3.1.0",
             description:
               "Deployment gate — scores code risk, checks production health, computes DORA-5 metrics, integrates security signals.",
             tools: [
@@ -1020,6 +1163,8 @@ server.resource(
               "get-deployment-status",
               "suggest-deploy-timing",
             ],
+            resources: ["deployguard://health", "deployguard://server-card"],
+            adapters: ["vercel", "supabase", "aws-ecs", "fly-io", "cloudflare"],
             homepage: "https://github.com/dschirmer-shiftkey/deployguard",
           },
           null,

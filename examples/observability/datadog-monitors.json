@@ -1,0 +1,83 @@
+{
+  "_comment": "Datadog monitor definitions for DeployGuard OTel spans. Import via Datadog API or Terraform datadog_monitor resource.",
+  "monitors": [
+    {
+      "name": "[DeployGuard] High block rate",
+      "type": "trace-analytics alert",
+      "query": "trace-analytics(\"deployguard.decision:block service:deployguard\").rollup(\"count\").by(\"resource_name\").last(\"1h\") > 5",
+      "message": "DeployGuard has blocked more than 5 deployments in the last hour.\n\nRepo: {{resource_name}}\n\nThis may indicate a systemic risk increase — check PR quality, security alerts, or infrastructure stability.\n\n@slack-deployguard-alerts",
+      "tags": ["service:deployguard", "team:platform", "env:production"],
+      "options": {
+        "thresholds": {
+          "critical": 5,
+          "warning": 2
+        },
+        "notify_no_data": false,
+        "renotify_interval": 60,
+        "evaluation_delay": 60,
+        "include_tags": true
+      }
+    },
+    {
+      "name": "[DeployGuard] Risk score spike",
+      "type": "trace-analytics alert",
+      "query": "trace-analytics(\"service:deployguard\").rollup(\"avg\",\"deployguard.risk_score\").last(\"30m\") > 70",
+      "message": "Average DeployGuard risk score has exceeded 70 over the last 30 minutes.\n\nThis indicates PRs with high code churn, sensitive file changes, or missing test coverage are being evaluated.\n\n@slack-deployguard-alerts",
+      "tags": ["service:deployguard", "team:platform"],
+      "options": {
+        "thresholds": {
+          "critical": 70,
+          "warning": 55
+        },
+        "notify_no_data": false,
+        "renotify_interval": 120
+      }
+    },
+    {
+      "name": "[DeployGuard] Health score degradation",
+      "type": "trace-analytics alert",
+      "query": "trace-analytics(\"service:deployguard\").rollup(\"avg\",\"deployguard.health_score\").last(\"15m\") < 50",
+      "message": "DeployGuard health score has dropped below 50 — production endpoints may be degraded or unreachable.\n\nCheck health check targets for outages.\n\n@pagerduty-platform",
+      "tags": ["service:deployguard", "team:platform", "severity:high"],
+      "options": {
+        "thresholds": {
+          "critical": 50,
+          "warning": 70
+        },
+        "notify_no_data": true,
+        "no_data_timeframe": 30,
+        "renotify_interval": 30
+      }
+    },
+    {
+      "name": "[DeployGuard] Slow evaluation latency",
+      "type": "trace-analytics alert",
+      "query": "trace-analytics(\"service:deployguard\").rollup(\"p95\",\"deployguard.evaluation_ms\").last(\"30m\") > 15000",
+      "message": "DeployGuard evaluation p95 latency exceeds 15 seconds.\n\nThis may indicate slow GitHub API responses, health check timeouts, or network issues.\n\n@slack-deployguard-alerts",
+      "tags": ["service:deployguard", "team:platform"],
+      "options": {
+        "thresholds": {
+          "critical": 15000,
+          "warning": 10000
+        },
+        "notify_no_data": false,
+        "renotify_interval": 60
+      }
+    },
+    {
+      "name": "[DeployGuard] No evaluations (silent gate)",
+      "type": "trace-analytics alert",
+      "query": "trace-analytics(\"service:deployguard\").rollup(\"count\").last(\"6h\") < 1",
+      "message": "No DeployGuard evaluations have been recorded in the last 6 hours.\n\nThis could indicate the action is not running, OTel export is broken, or no PRs are being opened.\n\n@slack-deployguard-alerts",
+      "tags": ["service:deployguard", "team:platform"],
+      "options": {
+        "thresholds": {
+          "critical": 1
+        },
+        "notify_no_data": true,
+        "no_data_timeframe": 360,
+        "renotify_interval": 360
+      }
+    }
+  ]
+}

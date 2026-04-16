@@ -1,5 +1,9 @@
 # DeployGuard
 
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-DeployGuard-green?logo=github)](https://github.com/marketplace/actions/deployguard)
+[![CI](https://github.com/dschirmer-shiftkey/deployguard/actions/workflows/ci.yml/badge.svg)](https://github.com/dschirmer-shiftkey/deployguard/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Deployment gate for GitHub PRs. Scores code risk, checks production health, integrates security signals, computes DORA-5 metrics, and blocks dangerous releases — all in a single GitHub Action.
 
 ## Quick Start
@@ -205,29 +209,26 @@ ignore:
 
 ---
 
-## MCP Server
+## GitHub App
 
-DeployGuard ships a [Model Context Protocol](https://modelcontextprotocol.io) server in `mcp/` that exposes 12 tools for AI agents:
+DeployGuard also ships as a GitHub App for [deployment protection rules](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules). When installed, it automatically gates deployments to protected environments based on real-time risk scoring and health checks.
 
-| Tool                    | Description                                     |
-| ----------------------- | ----------------------------------------------- |
-| `check-http-health`     | HTTP endpoint health check                      |
-| `check-vercel-health`   | Vercel deployment status                        |
-| `check-supabase-health` | Supabase REST API check                         |
-| `compute-risk-score`    | Risk score for changed files                    |
-| `evaluate-deployment`   | Full evaluation (health + risk)                 |
-| `get-dora-metrics`      | DORA-5 metrics with optional environment filter |
-| `compare-risk-history`  | Compare risk across recent PRs                  |
-| `explain-risk-factors`  | Natural language risk explanation               |
-| `evaluate-policy`       | Full policy evaluation for CI agents            |
-| `get-security-alerts`   | Code scanning alerts by severity                |
-| `get-deployment-status` | Environment-aware deployment info               |
-| `suggest-deploy-timing` | Freeze window + failure-aware timing            |
+See [`app/README.md`](app/README.md) for setup and configuration details.
 
-```bash
-cd mcp && npm install && npm run build
-node dist/server.js
+---
+
+## OpenTelemetry
+
+Export every gate evaluation as an OTel span. Point `otel-endpoint` at any OTLP-compatible collector:
+
+```yaml
+- uses: dschirmer-shiftkey/deployguard@v3
+  with:
+    otel-endpoint: "https://otel-collector.example.com:4318/v1/traces"
+    otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"
 ```
+
+Pre-built dashboards for Grafana and Datadog are available in [`examples/observability/`](examples/observability/).
 
 ---
 
@@ -298,6 +299,22 @@ npx deployguard init
 Interactive wizard that generates `.deployguard.yml` and the workflow YAML with all v3 features. No installation required.
 
 ---
+
+## Examples
+
+- [Multi-CI templates](examples/) — GitLab CI and CircleCI configurations
+- [Observability dashboards](examples/observability/) — Grafana and Datadog dashboard imports
+- [Auto-rollback workflow](examples/github-actions/) — automated rollback on deployment failure
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for our security policy and how to report vulnerabilities.
 
 ## License
 

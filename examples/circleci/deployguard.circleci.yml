@@ -1,0 +1,110 @@
+# DeployGuard for CircleCI
+#
+# This config replicates DeployGuard's risk scoring for CircleCI pull requests.
+# Since DeployGuard is a GitHub Action, this template uses a Node.js script
+# to score changed files using the same logic as the shared risk engine.
+#
+# Prerequisites:
+# - Set environment variables in CircleCI project settings:
+#   DEPLOYGUARD_RISK_THRESHOLD (default: 70)
+#   DEPLOYGUARD_WARN_THRESHOLD (default: 55)
+#   CIRCLE_TOKEN (for PR branch detection)
+#
+# Merge into your .circleci/config.yml or use CircleCI orb syntax.
+
+version: 2.1
+
+jobs:
+  deployguard:
+    docker:
+      - image: cimg/node:20.0
+    steps:
+      - checkout
+      - run:
+          name: DeployGuard risk scoring
+          command: |
+            RISK_THRESHOLD="${DEPLOYGUARD_RISK_THRESHOLD:-70}"
+            WARN_THRESHOLD="${DEPLOYGUARD_WARN_THRESHOLD:-55}"
+
+            # Determine base branch for diff
+            BASE_BRANCH="${CIRCLE_BRANCH:-main}"
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              # Extract PR number and fetch base branch
+              git fetch origin main --depth=50 2>/dev/null || true
+              BASE_REF="origin/main"
+            else
+              echo "Not a pull request — skipping DeployGuard."
+              exit 0
+            fi
+
+            echo "DeployGuard — scoring changes against ${BASE_REF}"
+
+            # Collect changed files
+            FILES_JSON=$(git diff --numstat "${BASE_REF}...HEAD" \
+              | awk '{print "{\"filename\":\""$3"\",\"changes\":"($1+$2)"}"}' \
+              | paste -sd ',' | sed 's/^/[/;s/$/]/')
+
+            if [ "$FILES_JSON" = "[]" ]; then
+              echo "No files changed — score 0, decision: allow"
+              exit 0
+            fi
+
+            node -e "
+              const files = JSON.parse(process.argv[1]);
+              const totalChanges = files.reduce((s, f) => s + f.changes, 0);
+              const fileCount = files.length;
+
+              const sensitivePatterns = [
+                /(?:^|\/)migrations\//i, /(?:^|\/)auth/i, /(?:^|\/)security/i,
+                /(?:^|\/)payment/i, /(?:^|\/)billing/i, /(?:^|\/)webhook/i,
+                /(?:^|\/)infrastructure\//i,
+              ];
+              const sensitiveCount = files.filter(f =>
+                sensitivePatterns.some(p => p.test(f.filename))
+              ).length;
+
+              const fileCountScore = Math.min(100, Math.round(30 * Math.log2(1 + fileCount)));
+              const churnScore = Math.min(100, Math.round(25 * Math.log2(1 + totalChanges / 50)));
+              const sensitiveScore = Math.min(100, sensitiveCount * 25);
+
+              const factors = [
+                { type: 'file_count', score: fileCountScore, weight: 2 },
+                { type: 'code_churn', score: churnScore, weight: 3 },
+              ];
+              if (sensitiveCount > 0) {
+                factors.push({ type: 'sensitive_files', score: sensitiveScore, weight: 3 });
+              }
+
+              const totalWeight = factors.reduce((s, f) => s + f.weight, 0);
+              const score = Math.round(factors.reduce((s, f) => s + f.score * f.weight, 0) / totalWeight);
+
+              const threshold = parseInt('${RISK_THRESHOLD}', 10);
+              const warnThreshold = parseInt('${WARN_THRESHOLD}', 10);
+              const decision = score > threshold ? 'block' : score > warnThreshold ? 'warn' : 'allow';
+
+              console.log('');
+              console.log('DeployGuard Risk Report');
+              console.log('======================');
+              console.log('Score:    ' + score + '/100');
+              console.log('Decision: ' + decision.toUpperCase());
+              console.log('Files:    ' + fileCount);
+              console.log('Changes:  ' + totalChanges + ' lines');
+              if (sensitiveCount > 0) console.log('Sensitive: ' + sensitiveCount + ' file(s)');
+              console.log('');
+              factors.forEach(f => console.log('  ' + f.type + ': ' + f.score + '/100'));
+
+              if (decision === 'block') {
+                console.error('BLOCKED: risk score ' + score + ' exceeds threshold ' + threshold);
+                process.exit(1);
+              }
+            " "$FILES_JSON"
+
+workflows:
+  pr-gate:
+    jobs:
+      - deployguard:
+          filters:
+            branches:
+              ignore:
+                - main
+                - master

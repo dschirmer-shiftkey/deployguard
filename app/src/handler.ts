@@ -96,6 +96,71 @@ async function findPrForSha(
   }
 }
 
+function ghHeaders(token: string) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+async function fetchChangedFilesFromApi(
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<FileInfo[]> {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=300`,
+    { headers: ghHeaders(token) },
+  );
+  if (!res.ok) return [];
+  return (await res.json()) as FileInfo[];
+}
+
+async function fetchChangedFilesFromCommits(
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<FileInfo[]> {
+  const commitsRes = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=250`,
+    { headers: ghHeaders(token) },
+  );
+  if (!commitsRes.ok) return [];
+  const commits = (await commitsRes.json()) as Array<{ sha: string }>;
+
+  const fileMap = new Map<string, FileInfo>();
+  for (const commit of commits) {
+    const detailRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${commit.sha}`,
+      { headers: ghHeaders(token) },
+    );
+    if (!detailRes.ok) continue;
+    const detail = (await detailRes.json()) as {
+      files?: Array<{
+        filename: string;
+        additions?: number;
+        deletions?: number;
+        changes: number;
+      }>;
+    };
+    for (const f of detail.files ?? []) {
+      const existing = fileMap.get(f.filename);
+      if (existing) {
+        existing.changes += f.changes;
+      } else {
+        fileMap.set(f.filename, { filename: f.filename, changes: f.changes });
+      }
+    }
+  }
+  return Array.from(fileMap.values());
+}
+
+const DRIFT_CHECK_FILE_THRESHOLD = 30;
+const MERGE_BASE_DRIFT_RATIO = 2.0;
+
 async function fetchChangedFiles(
   token: string,
   owner: string,
@@ -103,18 +168,31 @@ async function fetchChangedFiles(
   prNumber: number,
 ): Promise<FileInfo[]> {
   try {
-    const res = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=300`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      },
-    );
-    if (!res.ok) return [];
-    return (await res.json()) as FileInfo[];
+    const apiFiles = await fetchChangedFilesFromApi(token, owner, repo, prNumber);
+
+    if (apiFiles.length <= DRIFT_CHECK_FILE_THRESHOLD) {
+      return apiFiles;
+    }
+
+    let commitFiles: FileInfo[];
+    try {
+      commitFiles = await fetchChangedFilesFromCommits(token, owner, repo, prNumber);
+    } catch {
+      return apiFiles;
+    }
+
+    if (
+      commitFiles.length > 0 &&
+      apiFiles.length > commitFiles.length * MERGE_BASE_DRIFT_RATIO
+    ) {
+      console.log(
+        `[DeployGuard] Merge-base drift: API reported ${apiFiles.length} files, ` +
+          `commits touch ${commitFiles.length}. Using commit-derived list.`,
+      );
+      return commitFiles;
+    }
+
+    return apiFiles;
   } catch {
     return [];
   }
