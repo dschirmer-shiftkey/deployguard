@@ -692,6 +692,48 @@ server.tool(
         if (filesRes.ok) {
           files = (await filesRes.json()) as FileInfo[];
         }
+
+        if (files.length > 30) {
+          try {
+            const commitsRes = await fetch(
+              `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=250`,
+              { headers },
+            );
+            if (commitsRes.ok) {
+              const commits = (await commitsRes.json()) as Array<{
+                sha: string;
+              }>;
+              const fileMap = new Map<string, FileInfo>();
+              for (const c of commits) {
+                const detailRes = await fetch(
+                  `https://api.github.com/repos/${owner}/${repo}/commits/${c.sha}`,
+                  { headers },
+                );
+                if (!detailRes.ok) continue;
+                const detail = (await detailRes.json()) as {
+                  files?: Array<{
+                    filename: string;
+                    changes: number;
+                  }>;
+                };
+                for (const f of detail.files ?? []) {
+                  if (!fileMap.has(f.filename)) {
+                    fileMap.set(f.filename, {
+                      filename: f.filename,
+                      changes: f.changes,
+                    });
+                  }
+                }
+              }
+              const commitFiles = Array.from(fileMap.values());
+              if (commitFiles.length > 0 && files.length > commitFiles.length * 2) {
+                files = commitFiles;
+              }
+            }
+          } catch {
+            /* keep API files on cross-check failure */
+          }
+        }
       } catch {
         /* skip */
       }

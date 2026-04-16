@@ -55,6 +55,81 @@ interface PrFileInfo {
 // PR diff fetching via @actions/github
 // ---------------------------------------------------------------------------
 
+async function fetchPrFilesFromApi(
+  octokit: ReturnType<typeof github.getOctokit>,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<PrFileInfo[]> {
+  const { data: files } = await octokit.rest.pulls.listFiles({
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 300,
+  });
+
+  if (files.length >= 300) {
+    core.warning(
+      "PR has 300+ files — risk analysis may be incomplete (GitHub API pagination limit)",
+    );
+  }
+
+  return files.map((f) => ({
+    filename: f.filename,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+  }));
+}
+
+async function fetchPrFilesFromCommits(
+  octokit: ReturnType<typeof github.getOctokit>,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<PrFileInfo[]> {
+  const { data: commits } = await octokit.rest.pulls.listCommits({
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 250,
+  });
+
+  const fileMap = new Map<string, PrFileInfo>();
+
+  for (const commit of commits) {
+    const { data: detail } = await octokit.rest.repos.getCommit({
+      owner,
+      repo,
+      ref: commit.sha,
+    });
+
+    for (const f of detail.files ?? []) {
+      const existing = fileMap.get(f.filename);
+      if (existing) {
+        existing.additions += f.additions ?? 0;
+        existing.deletions += f.deletions ?? 0;
+        existing.changes += f.changes ?? 0;
+      } else {
+        fileMap.set(f.filename, {
+          filename: f.filename,
+          additions: f.additions ?? 0,
+          deletions: f.deletions ?? 0,
+          changes: f.changes ?? 0,
+        });
+      }
+    }
+  }
+
+  return Array.from(fileMap.values());
+}
+
+// Skip the commit-based cross-check for small PRs (cheap fast path).
+const DRIFT_CHECK_FILE_THRESHOLD = 30;
+// If the API reports more than 2x the files the commits actually touch,
+// the merge-base is stale and we use the commit-derived list instead.
+const MERGE_BASE_DRIFT_RATIO = 2.0;
+
 async function fetchPrFiles(prNumber: number, token?: string): Promise<PrFileInfo[]> {
   if (!token) return [];
 
@@ -62,25 +137,42 @@ async function fetchPrFiles(prNumber: number, token?: string): Promise<PrFileInf
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
 
-    const { data: files } = await octokit.rest.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: 300,
-    });
+    const apiFiles = await fetchPrFilesFromApi(octokit, owner, repo, prNumber);
 
-    if (files.length >= 300) {
-      core.warning(
-        "PR has 300+ files — risk analysis may be incomplete (GitHub API pagination limit)",
-      );
+    if (apiFiles.length <= DRIFT_CHECK_FILE_THRESHOLD) {
+      return apiFiles;
     }
 
-    return files.map((f) => ({
-      filename: f.filename,
-      additions: f.additions,
-      deletions: f.deletions,
-      changes: f.changes,
-    }));
+    // GitHub's pulls.listFiles uses a merge-base diff that can include
+    // files from unrelated commits when the base branch has diverged
+    // from the PR branch point.  Cross-check against the files the PR's
+    // commits actually touch and fall back when inflation is detected.
+    core.info(
+      `PR reports ${apiFiles.length} files (>${DRIFT_CHECK_FILE_THRESHOLD}), ` +
+        `cross-checking against commit-level file list for merge-base drift.`,
+    );
+
+    let commitFiles: PrFileInfo[];
+    try {
+      commitFiles = await fetchPrFilesFromCommits(octokit, owner, repo, prNumber);
+    } catch (err) {
+      core.debug(`Commit-level file enumeration failed, using API list: ${err}`);
+      return apiFiles;
+    }
+
+    if (
+      commitFiles.length > 0 &&
+      apiFiles.length > commitFiles.length * MERGE_BASE_DRIFT_RATIO
+    ) {
+      core.warning(
+        `Merge-base drift: API reported ${apiFiles.length} files, ` +
+          `but PR commits only touch ${commitFiles.length}. ` +
+          `Using commit-derived file list to avoid inflated risk scores.`,
+      );
+      return commitFiles;
+    }
+
+    return apiFiles;
   } catch (error) {
     core.debug(`Failed to fetch PR files: ${error}`);
     return [];

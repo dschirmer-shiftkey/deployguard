@@ -607,7 +607,7 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 - **Bundler**: `@vercel/ncc` → single CJS file at `dist/index.js`.
 - **TypeScript**: `moduleResolution: "Bundler"`, `module: "ESNext"` — required because `@actions/github@9` ships ESM-only exports.
 - **Linting**: ESLint + typescript-eslint + Prettier (CI enforces `format:check` before lint).
-- **Testing**: Vitest (346 tests across 11 files).
+- **Testing**: Vitest (401 tests across 14 files).
 
 ### CI pipeline
 
