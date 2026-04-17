@@ -662,7 +662,7 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 - **Bundler**: `@vercel/ncc` → single CJS file at `dist/index.js`.
 - **TypeScript**: `moduleResolution: "Bundler"`, `module: "ESNext"` — required because `@actions/github@9` ships ESM-only exports.
 - **Linting**: ESLint + typescript-eslint + Prettier (CI enforces `format:check` before lint).
-- **Testing**: Vitest (401 tests across 14 files).
+- **Testing**: Vitest (452 tests across 17 files).
 
 ### CI pipeline
 
@@ -670,9 +670,10 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 
 1. `npm run format:check` — Prettier
 2. `npm run lint` — ESLint + `tsc --noEmit`
-3. `npm test` — Vitest
-4. `npm run build` — ncc bundle
-5. `git diff --exit-code dist/` — verifies committed `dist/` matches fresh build
+3. `tsc --noEmit` for `cli/`, `app/`, `mcp/` (each with prebuild where needed)
+4. `npx vitest run --coverage` — Vitest with coverage thresholds enforced (60/50/60/60)
+5. `npm run build` — ncc bundle
+6. `git diff --exit-code dist/` — verifies committed `dist/` matches fresh build
 
 **Note**: This repo uses `main` (not `dev`). Substitute `main` wherever the HQ protocol says `dev`.
 
@@ -719,4 +720,4 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 | `app/src/handler.ts` | GitHub App webhook handler                          |
 | `app/src/server.ts`  | Hono HTTP server                                    |
 | `cli/src/index.ts`   | `deployguard init` wizard                           |
-| `src/__tests__/`     | Vitest test suite (401 tests, 14 files)             |
+| `src/__tests__/`     | Vitest test suite (452 tests, 17 files)             |
