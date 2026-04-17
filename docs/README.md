@@ -176,8 +176,8 @@ Persist evaluation results for trend analysis:
 
 ## Key Decisions
 
-- **ADR-DG-001**: GitHub Action as primary distribution (vs. standalone CI service)
-- **ADR-DG-002**: Fail-open by default (vs. fail-closed)
-- **ADR-DG-003**: Shared risk engine across Action, App, and MCP (vs. independent implementations)
-- **ADR-DG-004**: Sensitivity-weighted code churn (vs. raw line count)
-- **ADR-DG-005**: DORA-5 computed from GitHub data (vs. requiring external deployment tracking)
+- **[ADR-001](adr/001-mcp-health-check-ecosystem.md)**: MCP health check ecosystem patterns (adapter-based provider model)
+- **[ADR-002](adr/002-fail-open-default.md)**: Fail-open by default (vs. fail-closed)
+- **[ADR-003](adr/003-shared-risk-engine.md)**: Shared risk engine across Action, App, and MCP (vs. independent implementations)
+- **[ADR-004](adr/004-sensitivity-weighted-churn.md)**: Sensitivity-weighted code churn (vs. raw line count)
+- **[ADR-005](adr/005-dora-from-github-data.md)**: DORA-5 computed from GitHub data (vs. requiring external deployment tracking)

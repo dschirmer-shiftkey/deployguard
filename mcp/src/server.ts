@@ -42,7 +42,7 @@ function jsonResult(data: unknown): ToolReturn {
 
 const server = new McpServer({
   name: "deployguard",
-  version: "3.0.0",
+  version: "3.0.2",
 });
 
 // ---------------------------------------------------------------------------
@@ -1146,7 +1146,7 @@ server.resource(
         text: JSON.stringify(
           {
             name: "deployguard",
-            version: "3.1.0",
+            version: "3.0.2",
             description:
               "Deployment gate — scores code risk, checks production health, computes DORA-5 metrics, integrates security signals.",
             tools: [
@@ -1185,6 +1185,14 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("MCP server failed:", err);
+  process.stderr.write(
+    JSON.stringify({
+      level: "error",
+      msg: "MCP server failed",
+      service: "deployguard-mcp",
+      ts: new Date().toISOString(),
+      error: String(err),
+    }) + "\n",
+  );
   process.exit(1);
 });

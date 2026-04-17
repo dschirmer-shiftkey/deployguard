@@ -1,9 +1,11 @@
+# Build context must be the repo root: docker build -f app/Dockerfile .
 FROM node:20-slim AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY app/package.json app/package-lock.json* ./
 RUN npm ci
-COPY tsconfig.json ./
-COPY src/ src/
+COPY app/tsconfig.json ./
+COPY src/risk-engine.ts src/risk-engine.ts
+COPY app/src/ src/
 RUN npx tsc
 
 FROM node:20-slim

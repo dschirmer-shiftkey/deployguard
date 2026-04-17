@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    name: Build & Publish
+    name: Build & Publish Action
     runs-on: ubuntu-latest
 
     steps:
@@ -49,3 +49,28 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "DeployGuard ${GITHUB_REF_NAME}" \
             --generate-notes
+
+  publish-cli:
+    name: Publish CLI to npm
+    runs-on: ubuntu-latest
+    needs: release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build CLI
+        working-directory: cli
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish to npm
+        working-directory: cli
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
