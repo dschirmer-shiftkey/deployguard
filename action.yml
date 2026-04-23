@@ -119,5 +119,5 @@ outputs:
     description: "The deployment environment used for this evaluation."
 
 runs:
-  using: "node20"
+  using: "node24"
   main: "dist/index.js"
