@@ -10,6 +10,8 @@ export interface FileInfo {
   additions?: number;
   deletions?: number;
   changes: number;
+  /** Raw unified diff patch for this file — enables package-level analysis */
+  patch?: string;
 }
 
 export interface RiskFactorResult {
@@ -302,11 +304,39 @@ export function detectDependencyChanges(files: FileInfo[]): RiskFactorResult | n
   );
   const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
 
-  const score = Math.min(
-    100,
+  // Baseline score: file-level heuristic
+  const baseScore =
     (hasManifest && hasLockfile ? 40 : hasManifest ? 60 : 20) +
-      Math.min(30, Math.round(totalChanges / 100)),
+    Math.min(30, Math.round(totalChanges / 100));
+
+  // Enhanced: package-level supply-chain analysis when patch is available
+  const manifestFile = depFiles.find(
+    (f) =>
+      /^package\.json$/.test(f.filename.replace(/.*\//, "")) && f.patch,
   );
+
+  let supplyChainDetail: Record<string, unknown> = {};
+  let supplyChainScore = 0;
+
+  if (manifestFile?.patch) {
+    const { analyseSupplyChain } = require("./supply-chain.js") as typeof import("./supply-chain.js");
+    const analysis = analyseSupplyChain(manifestFile.patch);
+    if (analysis) {
+      supplyChainScore = analysis.riskScore;
+      supplyChainDetail = {
+        addedPackages: analysis.addedCount,
+        removedPackages: analysis.removedCount,
+        updatedPackages: analysis.updatedCount,
+        majorBumps: analysis.majorBumpCount,
+        criticalScopeChanges: analysis.criticalScopeCount,
+        suspiciousNames: analysis.suspiciousCount,
+        riskSignals: analysis.riskSignals,
+      };
+    }
+  }
+
+  // Use the higher of base or supply-chain score
+  const score = Math.min(100, Math.max(baseScore, supplyChainScore));
 
   return {
     type: "dependency_changes",
@@ -317,6 +347,7 @@ export function detectDependencyChanges(files: FileInfo[]): RiskFactorResult | n
       hasLockfile,
       totalChanges,
       description: "Dependencies added or updated",
+      ...supplyChainDetail,
     },
   };
 }
