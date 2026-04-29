@@ -2,6 +2,12 @@
 
 All notable changes to DeployGuard will be documented in this file.
 
+## [3.0.2] - 2026-04-16
+
+### Fixed
+
+- **Merge-base drift scoring** — GitHub's `pulls.listFiles` API uses a merge-base diff that can include files from unrelated commits when the base branch diverges from the PR branch point. DeployGuard now cross-checks the API file list against the PR's actual commits when >30 files are reported. If the API count exceeds 2x the commit-derived count, the commit-level file list is used instead. This prevents inflated `file_count`, `code_churn`, and `sensitive_files` scores that caused false BLOCK decisions. Applied to all three code paths: Action (`gate.ts`), GitHub App (`handler.ts`), and MCP server (`server.ts`). Fail-open: if commit enumeration fails, the API list is kept.
+
 ## [3.0.1] - 2026-04-12
 
 ### Security

@@ -1,12 +1,12 @@
 {
-  "name": "@deployguard/mcp-server",
-  "version": "3.0.0",
+  "name": "@trailhead/mcp-server",
+  "version": "4.1.0",
   "private": true,
-  "description": "MCP server exposing DeployGuard health checks and risk scoring as tools",
+  "description": "MCP server exposing Trailhead deployment gate — health checks, risk scoring, DORA metrics, and policy enforcement as tools",
   "type": "module",
   "main": "dist/server.js",
   "bin": {
-    "deployguard-mcp": "dist/server.js"
+    "trailhead-mcp": "dist/server.js"
   },
   "scripts": {
     "prebuild": "node -e \"const fs=require('fs');fs.copyFileSync('../src/risk-engine.ts','src/risk-engine.ts');fs.mkdirSync('src/adapters',{recursive:true});['types','registry','vercel','supabase','aws-ecs','fly-io','cloudflare','index'].forEach(f=>fs.copyFileSync('../src/adapters/'+f+'.ts','src/adapters/'+f+'.ts'))\"",

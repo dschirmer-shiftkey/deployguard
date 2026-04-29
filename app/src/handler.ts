@@ -185,9 +185,15 @@ async function fetchChangedFiles(
       commitFiles.length > 0 &&
       apiFiles.length > commitFiles.length * MERGE_BASE_DRIFT_RATIO
     ) {
-      console.log(
-        `[DeployGuard] Merge-base drift: API reported ${apiFiles.length} files, ` +
-          `commits touch ${commitFiles.length}. Using commit-derived list.`,
+      process.stdout.write(
+        JSON.stringify({
+          level: "info",
+          msg: "Merge-base drift detected, using commit-derived file list",
+          service: "deployguard-app",
+          ts: new Date().toISOString(),
+          apiFileCount: apiFiles.length,
+          commitFileCount: commitFiles.length,
+        }) + "\n",
       );
       return commitFiles;
     }
@@ -323,7 +329,16 @@ export async function handleDeploymentProtectionRule(
     }),
   });
 
-  console.log(
-    `[DeployGuard] ${state.toUpperCase()} ${envName} — ${prRef} risk=${score} (threshold=${effectiveRiskThreshold})`,
-  );
+  const logEntry = {
+    level: "info",
+    msg: "Gate evaluation complete",
+    service: "deployguard-app",
+    ts: new Date().toISOString(),
+    state,
+    environment: envName,
+    pr: prRef,
+    riskScore: score,
+    threshold: effectiveRiskThreshold,
+  };
+  process.stdout.write(JSON.stringify(logEntry) + "\n");
 }

@@ -1,6 +1,6 @@
 {
   "name": "deployguard",
-  "version": "3.0.0",
+  "version": "3.0.2",
   "private": true,
   "description": "Deployment gate for GitHub PRs — scores code risk, checks production health, integrates security signals, and blocks dangerous releases.",
   "license": "MIT",

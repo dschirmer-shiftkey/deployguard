@@ -4,6 +4,17 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { handleDeploymentProtectionRule, verifySignature } from "./handler.js";
 import { parseVercelPayload, parseGenericPayload, executeRollback } from "./rollback.js";
 
+function logJson(level: string, msg: string, extra?: Record<string, unknown>): void {
+  const entry = {
+    level,
+    msg,
+    service: "deployguard-app",
+    ts: new Date().toISOString(),
+    ...extra,
+  };
+  process.stdout.write(JSON.stringify(entry) + "\n");
+}
+
 const app = new Hono();
 
 app.get("/health", (c) => c.json({ status: "ok", service: "deployguard-app" }));
@@ -25,7 +36,7 @@ app.post("/webhook", async (c) => {
     await handleDeploymentProtectionRule(payload, rawBody, signature);
     return c.json({ ok: true });
   } catch (err) {
-    console.error("Webhook handler error:", err);
+    logJson("error", "Webhook handler error", { error: String(err) });
     return c.json({ error: "internal error" }, 500);
   }
 });
@@ -59,9 +70,11 @@ app.post("/webhook/deploy-outcome", async (c) => {
     return c.json({ received: true, parsed: false, type: webhookType ?? "unknown" });
   }
 
-  console.log(
-    `[DeployGuard] Deploy outcome: ${outcome.status} for ${outcome.environment} (${outcome.source})`,
-  );
+  logJson("info", "Deploy outcome received", {
+    status: outcome.status,
+    environment: outcome.environment,
+    source: outcome.source,
+  });
 
   const rollbackEnabled = process.env.ROLLBACK_ON_FAILURE === "true";
 
@@ -93,7 +106,7 @@ app.post("/webhook/deploy-outcome", async (c) => {
 app.get("/.well-known/deployguard.json", (c) =>
   c.json({
     name: "DeployGuard",
-    version: "3.0.0",
+    version: "3.0.2",
     description:
       "Deployment gate — scores code risk, checks production health, blocks dangerous releases.",
     capabilities: [
@@ -109,5 +122,5 @@ app.get("/.well-known/deployguard.json", (c) =>
 );
 
 const port = parseInt(process.env.PORT ?? "3000", 10);
-console.log(`DeployGuard App listening on port ${port}`);
+logJson("info", "Server starting", { port });
 serve({ fetch: app.fetch, port });

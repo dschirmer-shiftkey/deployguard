@@ -41,8 +41,8 @@ function jsonResult(data: unknown): ToolReturn {
 }
 
 const server = new McpServer({
-  name: "deployguard",
-  version: "3.0.0",
+  name: "trailhead",
+  version: "4.1.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ server.tool(
 
 server.tool(
   "evaluate-deployment",
-  "Run a full DeployGuard evaluation including health checks and risk scoring. Provide the target URLs and file changes.",
+  "Run a full Trailhead evaluation including health checks and risk scoring. Provide the target URLs and file changes.",
   {
     healthUrls: z
       .array(z.string().url())
@@ -660,7 +660,7 @@ server.tool(
 
 server.tool(
   "evaluate-policy",
-  "Run a full DeployGuard policy evaluation for a PR or commit. Combines risk scoring, security alerts, and DORA context into a structured verdict. Requires GITHUB_TOKEN.",
+  "Run a full Trailhead policy evaluation for a PR or commit. Combines risk scoring, security alerts, and DORA context into a structured verdict. Requires GITHUB_TOKEN.",
   {
     owner: z.string().describe("GitHub repository owner"),
     repo: z.string().describe("GitHub repository name"),
@@ -1070,7 +1070,7 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Health Resource — deployguard://health (DG9: cached aggregate health)
+// Health Resource — trailhead://health (DG9: cached aggregate health)
 // ---------------------------------------------------------------------------
 
 let healthCache: { data: unknown; expiresAt: number } | null = null;
@@ -1078,7 +1078,7 @@ const HEALTH_CACHE_TTL_MS = 60_000;
 
 server.resource(
   "health",
-  "deployguard://health",
+  "trailhead://health",
   { mimeType: "application/json" },
   async () => {
     const now = Date.now();
@@ -1086,7 +1086,7 @@ server.resource(
       return {
         contents: [
           {
-            uri: "deployguard://health",
+            uri: "trailhead://health",
             mimeType: "application/json",
             text: JSON.stringify(healthCache.data, null, 2),
           },
@@ -1121,7 +1121,7 @@ server.resource(
     return {
       contents: [
         {
-          uri: "deployguard://health",
+          uri: "trailhead://health",
           mimeType: "application/json",
           text: JSON.stringify(data, null, 2),
         },
@@ -1136,17 +1136,17 @@ server.resource(
 
 server.resource(
   "server-card",
-  "deployguard://server-card",
+  "trailhead://server-card",
   { mimeType: "application/json" },
   async () => ({
     contents: [
       {
-        uri: "deployguard://server-card",
+        uri: "trailhead://server-card",
         mimeType: "application/json",
         text: JSON.stringify(
           {
-            name: "deployguard",
-            version: "3.1.0",
+            name: "trailhead",
+            version: "3.0.2",
             description:
               "Deployment gate — scores code risk, checks production health, computes DORA-5 metrics, integrates security signals.",
             tools: [
@@ -1163,9 +1163,9 @@ server.resource(
               "get-deployment-status",
               "suggest-deploy-timing",
             ],
-            resources: ["deployguard://health", "deployguard://server-card"],
+            resources: ["trailhead://health", "trailhead://server-card"],
             adapters: ["vercel", "supabase", "aws-ecs", "fly-io", "cloudflare"],
-            homepage: "https://github.com/dschirmer-shiftkey/deployguard",
+            homepage: "https://github.com/dschirmer-shiftkey/trailhead",
           },
           null,
           2,
@@ -1185,6 +1185,14 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("MCP server failed:", err);
+  process.stderr.write(
+    JSON.stringify({
+      level: "error",
+      msg: "MCP server failed",
+      service: "trailhead-mcp",
+      ts: new Date().toISOString(),
+      error: String(err),
+    }) + "\n",
+  );
   process.exit(1);
 });

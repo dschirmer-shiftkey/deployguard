@@ -242,7 +242,7 @@ async function main() {
 
   if (command !== "init") {
     print(`
-${BOLD}${GREEN}DeployGuard CLI v3.0.0${RESET}
+${BOLD}${GREEN}DeployGuard CLI v3.0.2${RESET}
 
 ${BOLD}Usage:${RESET}
   npx deployguard init    Interactive setup wizard

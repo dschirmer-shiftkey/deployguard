@@ -1,6 +1,6 @@
 {
   "name": "deployguard",
-  "version": "3.0.0",
+  "version": "3.0.2",
   "description": "DeployGuard CLI — setup wizard and utilities for the DeployGuard deployment gate",
   "type": "module",
   "bin": {
@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "start": "node dist/index.js"
   },
   "files": [

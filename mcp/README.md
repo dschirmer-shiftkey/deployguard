@@ -1,6 +1,6 @@
-# DeployGuard MCP Server
+# Trailhead MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes DeployGuard's deployment gate capabilities as 12 tools for AI agents.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Trailhead's deployment gate capabilities as 12 tools for AI agents.
 
 ## Tools
 
@@ -28,7 +28,7 @@ npm run build
 node dist/server.js
 ```
 
-The server communicates over **stdio** (standard MCP transport). Connect it to any MCP-compatible client (Claude Desktop, Cursor, etc.).
+The server communicates over **stdio** (standard MCP transport). Connect it to any MCP-compatible client (Claude Desktop, Cursor, Claude Code, Copilot, etc.).
 
 ### Cursor Configuration
 
@@ -37,9 +37,9 @@ Add to your MCP settings:
 ```json
 {
   "mcpServers": {
-    "deployguard": {
+    "trailhead": {
       "command": "node",
-      "args": ["/path/to/deployguard/mcp/dist/server.js"],
+      "args": ["/path/to/trailhead/mcp/dist/server.js"],
       "env": {
         "GITHUB_TOKEN": "ghp_..."
       }
@@ -55,9 +55,9 @@ Add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "deployguard": {
+    "trailhead": {
       "command": "node",
-      "args": ["/path/to/deployguard/mcp/dist/server.js"],
+      "args": ["/path/to/trailhead/mcp/dist/server.js"],
       "env": {
         "GITHUB_TOKEN": "ghp_..."
       }
@@ -84,4 +84,4 @@ The MCP server uses the same `risk-engine.ts` as the GitHub Action and App. The 
 
 ## Resources
 
-The server exposes a `server-card` resource at `deployguard://server-card` with metadata about the server version, capabilities, and available tools.
+The server exposes a `server-card` resource at `trailhead://server-card` with metadata about the server version, capabilities, and available tools.
