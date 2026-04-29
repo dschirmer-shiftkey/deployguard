@@ -118,7 +118,7 @@ export const RepoConfig = z.object({
 });
 export type RepoConfig = z.infer<typeof RepoConfig>;
 
-export interface DeployGuardConfig {
+export interface TrailheadConfig {
   apiKey: string;
   apiUrl: string;
   githubToken?: string;

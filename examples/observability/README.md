@@ -1,37 +1,37 @@
-# DeployGuard Observability
+# Trailhead Observability
 
-Pre-built dashboards and monitors for DeployGuard's OpenTelemetry spans.
+Pre-built dashboards and monitors for Trailhead's OpenTelemetry spans.
 
 ## Span Schema
 
-DeployGuard exports a single span per evaluation:
+Trailhead exports a single span per evaluation:
 
-| Attribute                                | Type   | Description                                                                                                                          |
-| ---------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `service.name`                           | string | Always `deployguard`                                                                                                                 |
-| `service.namespace`                      | string | `owner/repo`                                                                                                                         |
-| `deployguard.repo`                       | string | `owner/repo`                                                                                                                         |
-| `deployguard.commit_sha`                 | string | Commit SHA being evaluated                                                                                                           |
-| `deployguard.decision`                   | string | `allow`, `warn`, or `block`                                                                                                          |
-| `deployguard.risk_score`                 | int    | Risk score (0-100)                                                                                                                   |
-| `deployguard.health_score`               | int    | Health score (0-100)                                                                                                                 |
-| `deployguard.evaluation_ms`              | int    | Evaluation duration in ms                                                                                                            |
-| `deployguard.pr_number`                  | int    | PR number (when available)                                                                                                           |
-| `deployguard.file_count`                 | int    | Number of files changed                                                                                                              |
-| `deployguard.factor.<type>`              | int    | Per-factor risk score (e.g. `code_churn`, `file_count`, `sensitive_files`, `test_coverage`, `security_alerts`, `deployment_history`) |
-| `deployguard.health.<target>.status`     | string | Per-endpoint health status                                                                                                           |
-| `deployguard.health.<target>.latency_ms` | int    | Per-endpoint latency                                                                                                                 |
+| Attribute                              | Type   | Description                                                                                                                          |
+| -------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `service.name`                         | string | Always `trailhead`                                                                                                                   |
+| `service.namespace`                    | string | `owner/repo`                                                                                                                         |
+| `trailhead.repo`                       | string | `owner/repo`                                                                                                                         |
+| `trailhead.commit_sha`                 | string | Commit SHA being evaluated                                                                                                           |
+| `trailhead.decision`                   | string | `allow`, `warn`, or `block`                                                                                                          |
+| `trailhead.risk_score`                 | int    | Risk score (0-100)                                                                                                                   |
+| `trailhead.health_score`               | int    | Health score (0-100)                                                                                                                 |
+| `trailhead.evaluation_ms`              | int    | Evaluation duration in ms                                                                                                            |
+| `trailhead.pr_number`                  | int    | PR number (when available)                                                                                                           |
+| `trailhead.file_count`                 | int    | Number of files changed                                                                                                              |
+| `trailhead.factor.<type>`              | int    | Per-factor risk score (e.g. `code_churn`, `file_count`, `sensitive_files`, `test_coverage`, `security_alerts`, `deployment_history`) |
+| `trailhead.health.<target>.status`     | string | Per-endpoint health status                                                                                                           |
+| `trailhead.health.<target>.latency_ms` | int    | Per-endpoint latency                                                                                                                 |
 
-Span name: `deployguard.evaluate`  
-Span kind: `INTERNAL`  
+Span name: `trailhead.evaluate`
+Span kind: `INTERNAL`
 Status code: `OK` (1) for allow/warn, `ERROR` (2) for block
 
 ## Enabling OTel Export
 
-Add these inputs to the DeployGuard action:
+Add these inputs to the Trailhead action:
 
 ```yaml
-- uses: dschirmer-shiftkey/deployguard@v3
+- uses: KomatikAI/trailhead@v3
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     otel-endpoint: https://your-collector:4318
@@ -101,7 +101,7 @@ otlp_config:
         endpoint: 0.0.0.0:4318
 ```
 
-Point DeployGuard's `otel-endpoint` at `http://your-agent:4318`.
+Point Trailhead's `otel-endpoint` at `http://your-agent:4318`.
 
 ### Import Dashboard
 
@@ -153,24 +153,24 @@ done
 | Slow evaluation latency      | p95 >15s over 30m | Warning  |
 | No evaluations (silent gate) | 0 evals in 6h     | Warning  |
 
-All monitors send to `@slack-deployguard-alerts` by default — update the `message` field with your notification channels.
+All monitors send to `@slack-trailhead-alerts` by default — update the `message` field with your notification channels.
 
 ## Terraform
 
 If you manage Datadog via Terraform, you can import the monitor JSON into `datadog_monitor` resources:
 
 ```hcl
-resource "datadog_monitor" "deployguard_block_rate" {
-  name    = "[DeployGuard] High block rate"
+resource "datadog_monitor" "trailhead_block_rate" {
+  name    = "[Trailhead] High block rate"
   type    = "trace-analytics alert"
-  query   = "trace-analytics(\"deployguard.decision:block service:deployguard\").rollup(\"count\").by(\"resource_name\").last(\"1h\") > 5"
-  message = "DeployGuard blocked >5 deployments in 1h. @slack-deployguard-alerts"
+  query   = "trace-analytics(\"trailhead.decision:block service:trailhead\").rollup(\"count\").by(\"resource_name\").last(\"1h\") > 5"
+  message = "Trailhead blocked >5 deployments in 1h. @slack-trailhead-alerts"
 
   monitor_thresholds {
     critical = 5
     warning  = 2
   }
 
-  tags = ["service:deployguard", "team:platform"]
+  tags = ["service:trailhead", "team:platform"]
 }
 ```

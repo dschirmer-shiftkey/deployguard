@@ -69,7 +69,7 @@ jobs:
 
           {
             echo "report<<REPORT_EOF"
-            echo "$OUTPUT" | sed -n '/^## DeployGuard/,/^Raw evaluation/{ /^Raw evaluation/d; p; }'
+            echo "$OUTPUT" | sed -n '/^## Trailhead/,/^Raw evaluation/{ /^Raw evaluation/d; p; }'
             echo "REPORT_EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -86,7 +86,7 @@ jobs:
           EXIT_CODE: ${{ steps.gate.outputs.exit_code }}
         run: |
           {
-            echo "# DeployGuard Dry-Run"
+            echo "# Trailhead Dry-Run"
             echo ""
             echo "**Target:** \`${{ inputs.target-repo }}#${{ inputs.pr-number }}\`"
             echo "**Threshold:** ${{ inputs.risk-threshold }}"

@@ -1,4 +1,4 @@
-# DeployGuard App — Deployment Protection Rule
+# Trailhead App — Deployment Protection Rule
 
 A lightweight webhook server that acts as a GitHub **Custom Deployment Protection Rule**.
 When installed on a repository's environment, it automatically evaluates risk and approves
@@ -14,19 +14,19 @@ or rejects deployments without any workflow YAML changes.
 ## v3 Features
 
 - **Shared risk engine** — uses the same `computeRiskScore` and `decideGate` functions as the Action and MCP server. Scoring is always consistent.
-- **Per-environment threshold overrides** — reads `.deployguard.yml` from the repository and applies environment-specific risk/warn thresholds.
+- **Per-environment threshold overrides** — reads `.trailhead.yml` from the repository and applies environment-specific risk/warn thresholds.
 - **Deploy outcome webhook** — `/webhook/deploy-outcome` endpoint receives Vercel or generic deployment signals for canary tracking.
-- **Service discovery** — `/.well-known/deployguard.json` exposes capabilities for automated integration.
+- **Service discovery** — `/.well-known/trailhead.json` exposes capabilities for automated integration.
 - **Health endpoint** — `GET /health` returns `{ status: "ok" }` for load balancer probes.
 
 ## Endpoints
 
-| Method | Path                            | Purpose                                         |
-| ------ | ------------------------------- | ----------------------------------------------- |
-| POST   | `/webhook`                      | GitHub deployment protection rule webhook       |
-| POST   | `/webhook/deploy-outcome`       | Canary/deploy outcome signals (Vercel, generic) |
-| GET    | `/health`                       | Health check for load balancers                 |
-| GET    | `/.well-known/deployguard.json` | Service discovery and capabilities              |
+| Method | Path                          | Purpose                                         |
+| ------ | ----------------------------- | ----------------------------------------------- |
+| POST   | `/webhook`                    | GitHub deployment protection rule webhook       |
+| POST   | `/webhook/deploy-outcome`     | Canary/deploy outcome signals (Vercel, generic) |
+| GET    | `/health`                     | Health check for load balancers                 |
+| GET    | `/.well-known/trailhead.json` | Service discovery and capabilities              |
 
 ## Environment Variables
 
@@ -61,8 +61,8 @@ npm run dev
 ### Docker
 
 ```bash
-docker build -t deployguard-app .
-docker run -p 3000:3000 --env-file .env deployguard-app
+docker build -t trailhead-app .
+docker run -p 3000:3000 --env-file .env trailhead-app
 ```
 
 ### Register the GitHub App
@@ -70,7 +70,7 @@ docker run -p 3000:3000 --env-file .env deployguard-app
 1. Create a GitHub App with **Repository permissions**:
    - Actions: read
    - Deployments: read + write
-   - Contents: read (for `.deployguard.yml`)
+   - Contents: read (for `.trailhead.yml`)
 2. Subscribe to the `deployment_protection_rule` event
 3. Set the webhook URL to `https://your-host/webhook`
 4. Install the app on your repository
@@ -78,7 +78,7 @@ docker run -p 3000:3000 --env-file .env deployguard-app
 
 ## Per-Environment Overrides
 
-The app reads `.deployguard.yml` from the repository at evaluation time. Environment-specific thresholds override the defaults:
+The app reads `.trailhead.yml` from the repository at evaluation time. Environment-specific thresholds override the defaults:
 
 ```yaml
 environments:

@@ -40738,10 +40738,13 @@ async function loadRepoConfig(token) {
     try {
         const octokit = getOctokit(token);
         const { owner, repo } = github_context.repo;
+        const configPath = await findConfigPath(octokit, owner, repo);
+        if (!configPath)
+            return null;
         const { data } = await octokit.rest.repos.getContent({
             owner,
             repo,
-            path: ".deployguard.yml",
+            path: configPath,
         });
         if (Array.isArray(data) || data.type !== "file" || !data.content) {
             return null;
@@ -40750,19 +40753,34 @@ async function loadRepoConfig(token) {
         const raw = parseYaml(content);
         const parsed = RepoConfig.safeParse(raw);
         if (!parsed.success) {
-            core.warning(`.deployguard.yml parse error: ${parsed.error.message} — using defaults`);
+            core.warning(`${configPath} parse error: ${parsed.error.message} — using defaults`);
             return null;
         }
-        core.debug(`Loaded .deployguard.yml: ${JSON.stringify(parsed.data)}`);
+        core.debug(`Loaded ${configPath}: ${JSON.stringify(parsed.data)}`);
         return parsed.data;
     }
     catch (error) {
         const msg = String(error);
         if (!msg.includes("404") && !msg.includes("Not Found")) {
-            core.debug(`.deployguard.yml load failed: ${msg}`);
+            core.debug(`Trailhead config load failed: ${msg}`);
         }
         return null;
     }
+}
+async function findConfigPath(octokit, owner, repo) {
+    for (const path of [".trailhead.yml", ".deployguard.yml"]) {
+        try {
+            await octokit.rest.repos.getContent({ owner, repo, path });
+            return path;
+        }
+        catch (error) {
+            const msg = String(error);
+            if (!msg.includes("404") && !msg.includes("Not Found")) {
+                throw error;
+            }
+        }
+    }
+    return null;
 }
 
 
@@ -41484,7 +41502,7 @@ async function postPrComment(report, prNumber, token) {
             issue_number: prNumber,
             per_page: 100,
         });
-        const MARKER = "<!-- deployguard-gate-report -->";
+        const MARKER = "<!-- trailhead-gate-report -->";
         const body = `${MARKER}\n${report}`;
         const existing = comments.find((c) => c.body?.includes(MARKER));
         if (existing) {
@@ -41523,12 +41541,12 @@ async function createCheckRun(evaluation, report, token) {
         await octokit.rest.checks.create({
             owner,
             repo,
-            name: "DeployGuard",
+            name: "Trailhead",
             head_sha: evaluation.commitSha,
             status: "completed",
             conclusion: CONCLUSION_MAP[evaluation.gateDecision],
             output: {
-                title: `DeployGuard: ${evaluation.gateDecision.toUpperCase()}`,
+                title: `Trailhead: ${evaluation.gateDecision.toUpperCase()}`,
                 summary: report,
             },
         });
@@ -41541,27 +41559,27 @@ async function createCheckRun(evaluation, report, token) {
 // PR risk labels
 // ---------------------------------------------------------------------------
 const RISK_LABELS = {
-    "deployguard:low-risk": {
+    "trailhead:low-risk": {
         color: "0e8a16",
-        description: "DeployGuard: low risk score",
+        description: "Trailhead: low risk score",
     },
-    "deployguard:medium-risk": {
+    "trailhead:medium-risk": {
         color: "fbca04",
-        description: "DeployGuard: medium risk score",
+        description: "Trailhead: medium risk score",
     },
-    "deployguard:high-risk": {
+    "trailhead:high-risk": {
         color: "d93f0b",
-        description: "DeployGuard: high risk score",
+        description: "Trailhead: high risk score",
     },
 };
 function riskLabelForDecision(decision) {
     switch (decision) {
         case "allow":
-            return "deployguard:low-risk";
+            return "trailhead:low-risk";
         case "warn":
-            return "deployguard:medium-risk";
+            return "trailhead:medium-risk";
         case "block":
-            return "deployguard:high-risk";
+            return "trailhead:high-risk";
         default: {
             const _exhaustive = decision;
             throw new Error(`Unknown decision: ${_exhaustive}`);
@@ -41594,9 +41612,9 @@ async function managePrLabels(prNumber, decision, token) {
             issue_number: prNumber,
         });
         for (const label of currentLabels) {
-            if (label.name.startsWith("deployguard:") &&
-                label.name.endsWith("-risk") &&
-                label.name !== targetLabel) {
+            const isRiskLabel = (label.name.startsWith("trailhead:") || label.name.startsWith("deployguard:")) &&
+                label.name.endsWith("-risk");
+            if (isRiskLabel && label.name !== targetLabel) {
                 await octokit.rest.issues.removeLabel({
                     owner,
                     repo,
@@ -41801,7 +41819,7 @@ function formatGateReport(evaluation, riskThreshold) {
         : "n/a (not configured)";
     const envLabel = evaluation.environment ? ` (${evaluation.environment})` : "";
     const lines = [
-        `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}${envLabel}`,
+        `## ${icon} Trailhead — ${evaluation.gateDecision.toUpperCase()}${envLabel}`,
         ``,
         riskBadge(evaluation.riskScore, threshold) +
             " " +
@@ -41872,7 +41890,7 @@ async function sendWebhook(url, evaluation) {
         block: "🚫",
     };
     const emoji = decisionEmoji[evaluation.gateDecision] ?? "";
-    const slackText = `${emoji} DeployGuard *${evaluation.gateDecision.toUpperCase()}* — ` +
+    const slackText = `${emoji} Trailhead *${evaluation.gateDecision.toUpperCase()}* — ` +
         `risk ${evaluation.riskScore}/100` +
         (prUrl
             ? ` | <${prUrl}|PR #${evaluation.prNumber}>`
@@ -41946,7 +41964,7 @@ async function storeViaSupabase(evaluation) {
     if (!supabaseUrl || !serviceRoleKey) {
         return false;
     }
-    const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/deployguard_evaluations`;
+    const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/trailhead_evaluations`;
     const row = {
         id: evaluation.id,
         repo_id: evaluation.repoId,
@@ -42549,27 +42567,27 @@ async function exportOtelSpan(evaluation, endpoint, headersStr) {
     const startNano = (BigInt(Date.now() - evaluation.evaluationMs) * 1000000n).toString();
     const { owner, repo } = github_context.repo;
     const attributes = [
-        strAttr("deployguard.repo", `${owner}/${repo}`),
-        strAttr("deployguard.commit_sha", evaluation.commitSha),
-        strAttr("deployguard.decision", evaluation.gateDecision),
-        intAttr("deployguard.risk_score", evaluation.riskScore),
-        intAttr("deployguard.health_score", evaluation.healthScore),
-        intAttr("deployguard.evaluation_ms", evaluation.evaluationMs),
-        boolAttr("deployguard.has_report_url", !!evaluation.reportUrl),
+        strAttr("trailhead.repo", `${owner}/${repo}`),
+        strAttr("trailhead.commit_sha", evaluation.commitSha),
+        strAttr("trailhead.decision", evaluation.gateDecision),
+        intAttr("trailhead.risk_score", evaluation.riskScore),
+        intAttr("trailhead.health_score", evaluation.healthScore),
+        intAttr("trailhead.evaluation_ms", evaluation.evaluationMs),
+        boolAttr("trailhead.has_report_url", !!evaluation.reportUrl),
     ];
     if (evaluation.prNumber) {
-        intAttr("deployguard.pr_number", evaluation.prNumber);
-        attributes.push(intAttr("deployguard.pr_number", evaluation.prNumber));
+        intAttr("trailhead.pr_number", evaluation.prNumber);
+        attributes.push(intAttr("trailhead.pr_number", evaluation.prNumber));
     }
     for (const factor of evaluation.riskFactors) {
-        attributes.push(intAttr(`deployguard.factor.${factor.type}`, factor.score));
+        attributes.push(intAttr(`trailhead.factor.${factor.type}`, factor.score));
     }
     if (evaluation.files) {
-        attributes.push(intAttr("deployguard.file_count", evaluation.files.length));
+        attributes.push(intAttr("trailhead.file_count", evaluation.files.length));
     }
     for (const hc of evaluation.healthChecks) {
-        attributes.push(strAttr(`deployguard.health.${hc.target}.status`, hc.status));
-        attributes.push(intAttr(`deployguard.health.${hc.target}.latency_ms`, hc.latencyMs));
+        attributes.push(strAttr(`trailhead.health.${hc.target}.status`, hc.status));
+        attributes.push(intAttr(`trailhead.health.${hc.target}.latency_ms`, hc.latencyMs));
     }
     const statusCode = evaluation.gateDecision === "block" ? 2 : 1;
     const traceId = generateId(16);
@@ -42579,19 +42597,19 @@ async function exportOtelSpan(evaluation, endpoint, headersStr) {
             {
                 resource: {
                     attributes: [
-                        strAttr("service.name", "deployguard"),
+                        strAttr("service.name", "trailhead"),
                         strAttr("service.version", "2.0.0"),
                         strAttr("service.namespace", `${owner}/${repo}`),
                     ],
                 },
                 scopeSpans: [
                     {
-                        scope: { name: "deployguard", version: "2.0.0" },
+                        scope: { name: "trailhead", version: "2.0.0" },
                         spans: [
                             {
                                 traceId,
                                 spanId,
-                                name: "deployguard.evaluate",
+                                name: "trailhead.evaluate",
                                 kind: 1, // SPAN_KIND_INTERNAL
                                 startTimeUnixNano: startNano,
                                 endTimeUnixNano: now,
@@ -42966,9 +42984,12 @@ function initHealers() {
     registerHealer(playwrightHealer);
     registerHealer(cypressHealer);
 }
+function readEnv(primary, legacy) {
+    return process.env[primary] ?? (legacy ? process.env[legacy] : undefined);
+}
 async function runSelfHeal(config, prNumber) {
     const results = [];
-    const testFailures = process.env.DEPLOYGUARD_TEST_FAILURES;
+    const testFailures = readEnv("TRAILHEAD_TEST_FAILURES", "DEPLOYGUARD_TEST_FAILURES");
     if (!testFailures)
         return results;
     let failures;
@@ -42976,7 +42997,7 @@ async function runSelfHeal(config, prNumber) {
         failures = JSON.parse(testFailures);
     }
     catch {
-        core.debug("Could not parse DEPLOYGUARD_TEST_FAILURES — skipping self-heal");
+        core.debug("Could not parse TRAILHEAD_TEST_FAILURES — skipping self-heal");
         return results;
     }
     for (const { file, error } of failures) {
@@ -42992,7 +43013,7 @@ async function runSelfHeal(config, prNumber) {
                         repo,
                         issue_number: prNumber,
                         body: [
-                            `### DeployGuard Self-Heal Suggestion`,
+                            `### Trailhead Self-Heal Suggestion`,
                             ``,
                             `Test file \`${repairResult.testFile}\` failed ` +
                                 `(\`${repairResult.failureType}\`). ` +
@@ -43019,7 +43040,7 @@ async function run() {
         initHealers();
         const config = {
             apiKey: core.getInput("api-key") || "",
-            apiUrl: process.env.DEPLOYGUARD_API_URL || "",
+            apiUrl: readEnv("TRAILHEAD_API_URL", "DEPLOYGUARD_API_URL") || "",
             githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
             healthCheckUrls: (core.getInput("health-check-urls") || "")
                 .split(",")
@@ -43181,10 +43202,10 @@ async function run() {
     catch (error) {
         const failMode = core.getInput("fail-mode") || "open";
         if (failMode === "open") {
-            core.warning(`DeployGuard evaluation failed — proceeding with deployment (fail-open). Error: ${error}`);
+            core.warning(`Trailhead evaluation failed — proceeding with deployment (fail-open). Error: ${error}`);
         }
         else {
-            core.setFailed(`DeployGuard evaluation failed — blocking deployment (fail-closed). Error: ${error}`);
+            core.setFailed(`Trailhead evaluation failed — blocking deployment (fail-closed). Error: ${error}`);
         }
     }
 }

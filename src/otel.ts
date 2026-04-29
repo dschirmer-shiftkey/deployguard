@@ -58,31 +58,31 @@ export async function exportOtelSpan(
   const { owner, repo } = github.context.repo;
 
   const attributes: OtelAttribute[] = [
-    strAttr("deployguard.repo", `${owner}/${repo}`),
-    strAttr("deployguard.commit_sha", evaluation.commitSha),
-    strAttr("deployguard.decision", evaluation.gateDecision),
-    intAttr("deployguard.risk_score", evaluation.riskScore),
-    intAttr("deployguard.health_score", evaluation.healthScore),
-    intAttr("deployguard.evaluation_ms", evaluation.evaluationMs),
-    boolAttr("deployguard.has_report_url", !!evaluation.reportUrl),
+    strAttr("trailhead.repo", `${owner}/${repo}`),
+    strAttr("trailhead.commit_sha", evaluation.commitSha),
+    strAttr("trailhead.decision", evaluation.gateDecision),
+    intAttr("trailhead.risk_score", evaluation.riskScore),
+    intAttr("trailhead.health_score", evaluation.healthScore),
+    intAttr("trailhead.evaluation_ms", evaluation.evaluationMs),
+    boolAttr("trailhead.has_report_url", !!evaluation.reportUrl),
   ];
 
   if (evaluation.prNumber) {
-    intAttr("deployguard.pr_number", evaluation.prNumber);
-    attributes.push(intAttr("deployguard.pr_number", evaluation.prNumber));
+    intAttr("trailhead.pr_number", evaluation.prNumber);
+    attributes.push(intAttr("trailhead.pr_number", evaluation.prNumber));
   }
 
   for (const factor of evaluation.riskFactors) {
-    attributes.push(intAttr(`deployguard.factor.${factor.type}`, factor.score));
+    attributes.push(intAttr(`trailhead.factor.${factor.type}`, factor.score));
   }
 
   if (evaluation.files) {
-    attributes.push(intAttr("deployguard.file_count", evaluation.files.length));
+    attributes.push(intAttr("trailhead.file_count", evaluation.files.length));
   }
 
   for (const hc of evaluation.healthChecks) {
-    attributes.push(strAttr(`deployguard.health.${hc.target}.status`, hc.status));
-    attributes.push(intAttr(`deployguard.health.${hc.target}.latency_ms`, hc.latencyMs));
+    attributes.push(strAttr(`trailhead.health.${hc.target}.status`, hc.status));
+    attributes.push(intAttr(`trailhead.health.${hc.target}.latency_ms`, hc.latencyMs));
   }
 
   const statusCode = evaluation.gateDecision === "block" ? 2 : 1;
@@ -95,19 +95,19 @@ export async function exportOtelSpan(
       {
         resource: {
           attributes: [
-            strAttr("service.name", "deployguard"),
+            strAttr("service.name", "trailhead"),
             strAttr("service.version", "2.0.0"),
             strAttr("service.namespace", `${owner}/${repo}`),
           ],
         },
         scopeSpans: [
           {
-            scope: { name: "deployguard", version: "2.0.0" },
+            scope: { name: "trailhead", version: "2.0.0" },
             spans: [
               {
                 traceId,
                 spanId,
-                name: "deployguard.evaluate",
+                name: "trailhead.evaluate",
                 kind: 1, // SPAN_KIND_INTERNAL
                 startTimeUnixNano: startNano,
                 endTimeUnixNano: now,

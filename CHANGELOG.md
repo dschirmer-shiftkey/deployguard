@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes to DeployGuard will be documented in this file.
+All notable changes to Trailhead will be documented in this file.
 
 ## [3.0.2] - 2026-04-16
 
 ### Fixed
 
-- **Merge-base drift scoring** — GitHub's `pulls.listFiles` API uses a merge-base diff that can include files from unrelated commits when the base branch diverges from the PR branch point. DeployGuard now cross-checks the API file list against the PR's actual commits when >30 files are reported. If the API count exceeds 2x the commit-derived count, the commit-level file list is used instead. This prevents inflated `file_count`, `code_churn`, and `sensitive_files` scores that caused false BLOCK decisions. Applied to all three code paths: Action (`gate.ts`), GitHub App (`handler.ts`), and MCP server (`server.ts`). Fail-open: if commit enumeration fails, the API list is kept.
+- **Merge-base drift scoring** — GitHub's `pulls.listFiles` API uses a merge-base diff that can include files from unrelated commits when the base branch diverges from the PR branch point. Trailhead now cross-checks the API file list against the PR's actual commits when >30 files are reported. If the API count exceeds 2x the commit-derived count, the commit-level file list is used instead. This prevents inflated `file_count`, `code_churn`, and `sensitive_files` scores that caused false BLOCK decisions. Applied to all three code paths: Action (`gate.ts`), GitHub App (`handler.ts`), and MCP server (`server.ts`). Fail-open: if commit enumeration fails, the API list is kept.
 
 ## [3.0.1] - 2026-04-12
 
@@ -39,7 +39,7 @@ All notable changes to DeployGuard will be documented in this file.
 - **Failed Deployment Recovery Time (FDRT)** — new metric using GitHub Deployments API.
 - **Change Rework Rate** — identifies PRs that modify same files within 7-day windows.
 - **Per-environment DORA** — filter metrics by deployment environment using `dora-environment` input.
-- **Per-service views** — `.deployguard.yml` `services` map enables monorepo DORA breakdown.
+- **Per-service views** — `.trailhead.yml` `services` map enables monorepo DORA breakdown.
 - New outputs: `dora-fdrt`, `dora-rework-rate`.
 - Report header changed from "DORA Metrics" to "DORA-5 Metrics" with all 5 metrics.
 
@@ -47,7 +47,7 @@ All notable changes to DeployGuard will be documented in this file.
 
 - **SARIF / Code Scanning integration** (`src/security.ts`) — fetches GitHub Code Scanning alerts as a risk factor.
 - New risk factor type `security_alerts` (weight: 4, highest).
-- Configurable via `.deployguard.yml` `security` section: `severity_threshold`, `block_on_critical`, `ignore_rules`.
+- Configurable via `.trailhead.yml` `security` section: `severity_threshold`, `block_on_critical`, `ignore_rules`.
 - New input: `security-gate` (default `"true"`).
 - New output: `security-alerts-json`.
 - Security alerts section added to gate report.
@@ -57,7 +57,7 @@ All notable changes to DeployGuard will be documented in this file.
 - **Deploy outcome tracking** (`src/canary.ts`) — parse Vercel and generic deployment webhooks.
 - New risk factor type `deployment_history` (weight: 2).
 - Vercel webhook parser for `deployment.completed` events.
-- Generic webhook parser with configurable field mapping via `.deployguard.yml` `canary` section.
+- Generic webhook parser with configurable field mapping via `.trailhead.yml` `canary` section.
 - New `POST /webhook/deploy-outcome` endpoint on the GitHub App server.
 
 ### MCP Server (v3.0.0)
@@ -71,9 +71,9 @@ All notable changes to DeployGuard will be documented in this file.
 
 ### GitHub Integration
 
-- **Environment-aware thresholds** — `.deployguard.yml` `environments` section overrides risk/warn thresholds per environment.
+- **Environment-aware thresholds** — `.trailhead.yml` `environments` section overrides risk/warn thresholds per environment.
 - **Merge queue detection** — skips `author_history` factor for `merge_group` events.
-- **App handler improvements** — loads `.deployguard.yml` from repo, applies per-environment thresholds, actually validates webhook signature.
+- **App handler improvements** — loads `.trailhead.yml` from repo, applies per-environment thresholds, actually validates webhook signature.
 - New input: `environment`.
 
 ### CLI (v3.0.0)
@@ -87,15 +87,15 @@ All notable changes to DeployGuard will be documented in this file.
 - New schemas: `EnvironmentConfig`, `ServiceMapping`, `SecurityConfig`, `CanaryConfig`.
 - `RepoConfig` extended with `environments`, `services`, `security`, `canary`.
 - `GateEvaluation` extended with `environment`, `service`.
-- `DeployGuardConfig` extended with `environment`, `securityGate`.
+- `TrailheadConfig` extended with `environment`, `securityGate`.
 
 ## [2.2.0] - 2026-04-10
 
 ### Added
 
 - **`formatDeploymentFrequencyForOutput()`** in `src/dora.ts` — clear label when no default-branch deploy workflows were detected in the DORA window (avoids confusing “0 per month” in action outputs and job summary tables).
-- **Example workflow** — `examples/github-actions/deployguard-deploy-tracker.yml` patches `deploy_outcome` / `deployed_at` after a production push for dashboard correlation.
-- **`npx deployguard init`** — optional prompts for evaluation store URL, store secret name, and Supabase direct-insert fallback env vars; optional “DORA outputs” echo step when DORA is enabled.
+- **Example workflow** — `examples/github-actions/trailhead-deploy-tracker.yml` patches `deploy_outcome` / `deployed_at` after a production push for dashboard correlation.
+- **`npx trailhead init`** — optional prompts for evaluation store URL, store secret name, and Supabase direct-insert fallback env vars; optional “DORA outputs” echo step when DORA is enabled.
 
 ### Changed
 
@@ -125,14 +125,14 @@ All notable changes to DeployGuard will be documented in this file.
 ### Added
 
 - **DORA metrics engine** (`src/dora.ts`) — Computes deployment frequency, change failure rate, and lead time to change from GitHub data. Opt in with `dora-metrics: "true"`. Results appear as shield badges in the Job Summary and as action outputs (`dora-deployment-frequency`, `dora-change-failure-rate`, `dora-lead-time`, `dora-rating`, `dora-json`).
-- **OpenTelemetry span export** (`src/otel.ts`) — Emits a `deployguard.evaluate` span via OTLP/HTTP with attributes for risk score, health score, decision, risk factors, and DORA metrics. No heavy SDK dependency — constructs the JSON payload directly. Configure with `otel-endpoint` and `otel-headers` inputs.
+- **OpenTelemetry span export** (`src/otel.ts`) — Emits a `trailhead.evaluate` span via OTLP/HTTP with attributes for risk score, health score, decision, risk factors, and DORA metrics. No heavy SDK dependency — constructs the JSON payload directly. Configure with `otel-endpoint` and `otel-headers` inputs.
 - **GitHub App for Deployment Protection Rules** (`app/`) — Lightweight Hono webhook server that acts as a native Custom Deployment Protection Rule. Evaluates risk and approves/rejects deployments at the environment level without workflow YAML changes. Includes Dockerfile for self-hosting.
 - **MCP server v2** — Upgraded to v2.0.0 with Server Card resource, and three new tools: `get-dora-metrics`, `compare-risk-history`, `explain-risk-factors`. Existing tools remain backward-compatible.
 - **Dependency change detection** — New `dependency_changes` risk factor detects modifications to `package.json`, lockfiles, `go.mod`, `requirements.txt`, and other dependency manifests. Carries weight 2.
 - **PR age factor** — New `pr_age` risk factor scores PRs higher when they've been open for many days (stale PRs carry more risk from merge conflicts and context loss). Carries weight 1.
-- **Release freeze windows** — New `freeze` config in `.deployguard.yml` blocks deployments during specified days/hours (e.g., no deploys after 3pm Friday). Frozen deploys are automatically blocked.
+- **Release freeze windows** — New `freeze` config in `.trailhead.yml` blocks deployments during specified days/hours (e.g., no deploys after 3pm Friday). Frozen deploys are automatically blocked.
 - **Rich Job Summary** — PR reports now include shield.io badges, collapsible risk factor breakdown with ASCII bar charts, health check status icons, and improved sensitive file markers.
-- **`npx deployguard init` CLI** (`cli/`) — Interactive setup wizard that generates `.deployguard.yml` and `.github/workflows/deployguard.yml` with guided prompts for thresholds, health checks, DORA, OTel, and freeze windows.
+- **`npx trailhead init` CLI** (`cli/`) — Interactive setup wizard that generates `.trailhead.yml` and `.github/workflows/trailhead.yml` with guided prompts for thresholds, health checks, DORA, OTel, and freeze windows.
 
 ### Changed
 
@@ -146,7 +146,7 @@ All notable changes to DeployGuard will be documented in this file.
 
 - **Diff-aware risk scoring** — Churn is weighted by file sensitivity: auth/payment files count 3x, infrastructure 2x, config 0.5x, tests 0.3x.
 - **PR split recommendations** — When a PR spans multiple areas (frontend, backend, migrations), the report suggests concrete split boundaries.
-- **Custom risk rules** — Drop a `.deployguard.yml` in your repo to define custom sensitivity patterns, factor weights, threshold overrides, and file ignores.
+- **Custom risk rules** — Drop a `.trailhead.yml` in your repo to define custom sensitivity patterns, factor weights, threshold overrides, and file ignores.
 - **Deployment correlation** — Track whether warned/blocked PRs caused post-deploy incidents via the deploy-event API. False positive and negative rates visible in trends.
 - **Trend dashboard** — Admin dashboard showing decision distribution, risk trends, top risk factors, and recent evaluations with Recharts visualizations.
 - **Slack/webhook notifications** — Configurable `webhook-url` and `webhook-events` inputs for real-time Slack or custom endpoint alerts on warn/block decisions.
@@ -172,7 +172,7 @@ All notable changes to DeployGuard will be documented in this file.
 ### Added
 
 - **GitHub Check Runs** — Creates a check run with pass/neutral/fail conclusion.
-- **PR risk labels** — Auto-applies `deployguard:low-risk`, `deployguard:medium-risk`, or `deployguard:high-risk` labels.
+- **PR risk labels** — Auto-applies `trailhead:low-risk`, `trailhead:medium-risk`, or `trailhead:high-risk` labels.
 - **Auto-request reviewers** — `reviewers-on-risk` input to request specific reviewers on warn/block.
 - **Webhook notifications** — Generic POST webhook with Slack-compatible payload.
 - **Actionable guidance** — PR comments include specific guidance based on risk factors.

@@ -1,16 +1,16 @@
-# DeployGuard auto-rollback workflow
+# Trailhead auto-rollback workflow
 #
-# Triggered via workflow_dispatch by DeployGuard's rollback module when a
+# Triggered via workflow_dispatch by Trailhead's rollback module when a
 # canary deployment reports failure. Can also be triggered manually.
 #
 # Prerequisites:
-# - Set DEPLOYGUARD_ROLLBACK_WORKFLOW=deployguard-auto-rollback.yml in your
-#   DeployGuard config (or pass as env var to the action).
+# - Set TRAILHEAD_ROLLBACK_WORKFLOW=trailhead-auto-rollback.yml in your
+#   Trailhead config (or pass as env var to the action).
 # - Ensure the GitHub token has `actions: write` and `deployments: write` permissions.
 #
 # Copy to .github/workflows/
 
-name: DeployGuard auto-rollback
+name: Trailhead auto-rollback
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ on:
       reason:
         description: "Reason for rollback"
         required: false
-        default: "deployguard-auto-rollback"
+        default: "trailhead-auto-rollback"
       triggered_by:
         description: "Who/what triggered this rollback"
         required: false
@@ -46,7 +46,7 @@ jobs:
 
       - name: Log rollback context
         run: |
-          echo "=== DeployGuard Rollback ==="
+          echo "=== Trailhead Rollback ==="
           echo "Target SHA:   ${{ inputs.target_sha }}"
           echo "Environment:  ${{ inputs.environment }}"
           echo "Reason:       ${{ inputs.reason }}"
@@ -80,6 +80,6 @@ jobs:
                 repo: context.repo.repo,
                 deployment_id: deployments[0].id,
                 state: '${{ job.status }}' === 'success' ? 'success' : 'failure',
-                description: 'DeployGuard rollback: ${{ inputs.reason }}',
+                description: 'Trailhead rollback: ${{ inputs.reason }}',
               });
             }

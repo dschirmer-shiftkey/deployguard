@@ -147,9 +147,9 @@ describe("run (main entrypoint)", () => {
     mockSummaryWrite.mockReset().mockResolvedValue(undefined);
     mockCreateComment.mockReset().mockResolvedValue({});
     mockContext.payload = { pull_request: { number: 42 } };
-    delete process.env.DEPLOYGUARD_TEST_FAILURES;
+    delete process.env.TRAILHEAD_TEST_FAILURES;
     delete process.env.GITHUB_TOKEN;
-    delete process.env.DEPLOYGUARD_API_URL;
+    delete process.env.TRAILHEAD_API_URL;
   });
 
   it("registers all three healers on startup", async () => {
@@ -359,14 +359,14 @@ describe("run (main entrypoint)", () => {
   it("stores evaluation when evaluation-store-url is set", async () => {
     setupInputs({
       "api-key": "test-key",
-      "evaluation-store-url": "https://example.com/api/deployguard/store",
+      "evaluation-store-url": "https://example.com/api/trailhead/store",
     });
     const eval_ = makeEvaluation();
     mockEvaluateGate.mockResolvedValue(eval_);
     await runMain();
 
     expect(mockStoreEvaluation).toHaveBeenCalledWith(
-      "https://example.com/api/deployguard/store",
+      "https://example.com/api/trailhead/store",
       eval_,
     );
   });
@@ -410,7 +410,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = JSON.stringify([
+    process.env.TRAILHEAD_TEST_FAILURES = JSON.stringify([
       { file: "src/foo.test.ts", error: "snapshot mismatch" },
     ]);
     mockAttemptRepair.mockResolvedValue({
@@ -436,7 +436,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = JSON.stringify([
+    process.env.TRAILHEAD_TEST_FAILURES = JSON.stringify([
       { file: "src/foo.test.ts", error: "snapshot mismatch" },
     ]);
     await runMain();
@@ -454,17 +454,17 @@ describe("run (main entrypoint)", () => {
     expect(mockAttemptRepair).not.toHaveBeenCalled();
   });
 
-  it("handles invalid JSON in DEPLOYGUARD_TEST_FAILURES gracefully", async () => {
+  it("handles invalid JSON in TRAILHEAD_TEST_FAILURES gracefully", async () => {
     setupInputs({ "api-key": "test-key", "github-token": "ghp_test" });
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = "not-json{{{";
+    process.env.TRAILHEAD_TEST_FAILURES = "not-json{{{";
     await runMain();
 
     expect(mockAttemptRepair).not.toHaveBeenCalled();
     expect(mockDebug).toHaveBeenCalledWith(
-      expect.stringContaining("Could not parse DEPLOYGUARD_TEST_FAILURES"),
+      expect.stringContaining("Could not parse TRAILHEAD_TEST_FAILURES"),
     );
   });
 
@@ -473,7 +473,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "block", riskScore: 90 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = JSON.stringify([
+    process.env.TRAILHEAD_TEST_FAILURES = JSON.stringify([
       { file: "src/foo.test.ts", error: "timeout" },
     ]);
     mockAttemptRepair.mockResolvedValue({
@@ -503,7 +503,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = JSON.stringify([
+    process.env.TRAILHEAD_TEST_FAILURES = JSON.stringify([
       { file: "src/foo.test.ts", error: "timeout" },
     ]);
     mockAttemptRepair.mockResolvedValue({
@@ -522,7 +522,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = JSON.stringify([
+    process.env.TRAILHEAD_TEST_FAILURES = JSON.stringify([
       { file: "src/foo.test.ts", error: "snapshot mismatch" },
     ]);
     mockAttemptRepair.mockResolvedValue({
@@ -545,7 +545,7 @@ describe("run (main entrypoint)", () => {
     mockEvaluateGate.mockResolvedValue(
       makeEvaluation({ gateDecision: "warn", riskScore: 55 }),
     );
-    process.env.DEPLOYGUARD_TEST_FAILURES = JSON.stringify([
+    process.env.TRAILHEAD_TEST_FAILURES = JSON.stringify([
       { file: "src/unknown.test.ts", error: "some error" },
     ]);
     mockAttemptRepair.mockResolvedValue(null);

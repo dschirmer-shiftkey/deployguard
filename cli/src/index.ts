@@ -43,7 +43,7 @@ function askYN(
   });
 }
 
-function generateDeployguardYml(options: {
+function generateTrailheadYml(options: {
   highSensitivity: string[];
   mediumSensitivity: string[];
   riskThreshold: number;
@@ -56,8 +56,8 @@ function generateDeployguardYml(options: {
   canaryType: string;
 }): string {
   const lines: string[] = [
-    "# DeployGuard v3 configuration",
-    "# https://github.com/dschirmer-shiftkey/deployguard",
+    "# Trailhead v3 configuration",
+    "# https://github.com/KomatikAI/trailhead",
     "",
   ];
 
@@ -138,7 +138,7 @@ function generateWorkflowYml(options: {
   environment: string;
 }): string {
   const lines: string[] = [
-    "name: DeployGuard",
+    "name: Trailhead",
     "",
     "on:",
     "  pull_request:",
@@ -151,12 +151,12 @@ function generateWorkflowYml(options: {
     "  security-events: read",
     "",
     "jobs:",
-    "  deployguard:",
+    "  trailhead:",
     "    runs-on: ubuntu-latest",
     "    steps:",
     "      - uses: actions/checkout@v4",
     "",
-    "      - uses: dschirmer-shiftkey/deployguard@v3",
+    "      - uses: KomatikAI/trailhead@v3",
     "        id: gate",
     "        with:",
     `          risk-threshold: "${options.riskThreshold}"`,
@@ -242,13 +242,13 @@ async function main() {
 
   if (command !== "init") {
     print(`
-${BOLD}${GREEN}DeployGuard CLI v3.0.2${RESET}
+${BOLD}${GREEN}Trailhead CLI v3.0.2${RESET}
 
 ${BOLD}Usage:${RESET}
-  npx deployguard init    Interactive setup wizard
+  npx trailhead init    Interactive setup wizard
 
 ${BOLD}Learn more:${RESET}
-  https://github.com/dschirmer-shiftkey/deployguard
+  https://github.com/KomatikAI/trailhead
 `);
     return;
   }
@@ -258,10 +258,8 @@ ${BOLD}Learn more:${RESET}
     output: process.stdout,
   });
 
-  print(`\n${BOLD}${GREEN}DeployGuard v3 Setup Wizard${RESET}\n`);
-  print(
-    `${DIM}This will create .deployguard.yml and a GitHub Actions workflow.${RESET}\n`,
-  );
+  print(`\n${BOLD}${GREEN}Trailhead v3 Setup Wizard${RESET}\n`);
+  print(`${DIM}This will create .trailhead.yml and a GitHub Actions workflow.${RESET}\n`);
 
   const riskStr = await ask(
     rl,
@@ -410,7 +408,7 @@ ${BOLD}Learn more:${RESET}
   if (wantStore) {
     evaluationStoreUrl = await ask(
       rl,
-      "Store URL (your API that accepts DeployGuard evaluation JSON)",
+      "Store URL (your API that accepts Trailhead evaluation JSON)",
       "",
     );
     storeSecretName = await ask(
@@ -445,7 +443,7 @@ ${BOLD}Learn more:${RESET}
 
   print(`\n${BOLD}Writing files...${RESET}\n`);
 
-  const configContent = generateDeployguardYml({
+  const configContent = generateTrailheadYml({
     highSensitivity,
     mediumSensitivity,
     riskThreshold,
@@ -458,9 +456,9 @@ ${BOLD}Learn more:${RESET}
     canaryType,
   });
 
-  const configPath = path.join(process.cwd(), ".deployguard.yml");
+  const configPath = path.join(process.cwd(), ".trailhead.yml");
   fs.writeFileSync(configPath, configContent, "utf-8");
-  print(`  ${GREEN}✓${RESET} .deployguard.yml`);
+  print(`  ${GREEN}✓${RESET} .trailhead.yml`);
 
   const workflowDir = path.join(process.cwd(), ".github", "workflows");
   fs.mkdirSync(workflowDir, { recursive: true });
@@ -478,19 +476,19 @@ ${BOLD}Learn more:${RESET}
     environment,
   });
 
-  const workflowPath = path.join(workflowDir, "deployguard.yml");
+  const workflowPath = path.join(workflowDir, "trailhead.yml");
   if (fs.existsSync(workflowPath)) {
     print(
-      `  ${YELLOW}⚠${RESET} .github/workflows/deployguard.yml already exists — writing to deployguard-generated.yml`,
+      `  ${YELLOW}⚠${RESET} .github/workflows/trailhead.yml already exists — writing to trailhead-generated.yml`,
     );
     fs.writeFileSync(
-      path.join(workflowDir, "deployguard-generated.yml"),
+      path.join(workflowDir, "trailhead-generated.yml"),
       workflowContent,
       "utf-8",
     );
   } else {
     fs.writeFileSync(workflowPath, workflowContent, "utf-8");
-    print(`  ${GREEN}✓${RESET} .github/workflows/deployguard.yml`);
+    print(`  ${GREEN}✓${RESET} .github/workflows/trailhead.yml`);
   }
 
   print(`
@@ -499,9 +497,9 @@ ${BOLD}${GREEN}Setup complete!${RESET}
 ${BOLD}Next steps:${RESET}
   1. Review the generated files
   2. Commit and push to your repository
-  3. Open a PR to see DeployGuard in action
+  3. Open a PR to see Trailhead in action
 
-${DIM}Docs: https://github.com/dschirmer-shiftkey/deployguard${RESET}
+${DIM}Docs: https://github.com/KomatikAI/trailhead${RESET}
 `);
 }
 

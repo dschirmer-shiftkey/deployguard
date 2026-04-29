@@ -189,7 +189,7 @@ async function fetchChangedFiles(
         JSON.stringify({
           level: "info",
           msg: "Merge-base drift detected, using commit-derived file list",
-          service: "deployguard-app",
+          service: "trailhead-app",
           ts: new Date().toISOString(),
           apiFileCount: apiFiles.length,
           commitFileCount: commitFiles.length,
@@ -210,17 +210,24 @@ async function fetchRepoConfig(
   repo: string,
 ): Promise<Record<string, unknown> | null> {
   try {
-    const res = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/.deployguard.yml`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      },
-    );
-    if (!res.ok) return null;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+    let res: Response | null = null;
+    for (const path of [".trailhead.yml", ".deployguard.yml"]) {
+      const candidate = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+        { headers },
+      );
+      if (candidate.ok) {
+        res = candidate;
+        break;
+      }
+      if (candidate.status !== 404) return null;
+    }
+    if (!res) return null;
     const data = (await res.json()) as {
       content?: string;
       type?: string;
@@ -295,20 +302,20 @@ export async function handleDeploymentProtectionRule(
   if (decision === "block") {
     state = "rejected";
     comment =
-      `**DeployGuard: BLOCKED** deployment to \`${envName}\`\n\n` +
+      `**Trailhead: BLOCKED** deployment to \`${envName}\`\n\n` +
       `Risk score **${score}/100** exceeds threshold (${effectiveRiskThreshold}) for ${prRef}.\n\n` +
       `**Top factors:** ${factorSummary}\n\n` +
       `> Review the changes and reduce risk before deploying.`;
   } else if (decision === "warn") {
     state = "approved";
     comment =
-      `**DeployGuard: WARNING** — approving deployment to \`${envName}\` with elevated risk.\n\n` +
+      `**Trailhead: WARNING** — approving deployment to \`${envName}\` with elevated risk.\n\n` +
       `Risk score **${score}/100** (warn threshold: ${effectiveWarnThreshold}) for ${prRef}.\n\n` +
       `**Top factors:** ${factorSummary}`;
   } else {
     state = "approved";
     comment =
-      `**DeployGuard: APPROVED** deployment to \`${envName}\`\n\n` +
+      `**Trailhead: APPROVED** deployment to \`${envName}\`\n\n` +
       `Risk score **${score}/100** for ${prRef}. ${factorSummary}`;
   }
 
@@ -332,7 +339,7 @@ export async function handleDeploymentProtectionRule(
   const logEntry = {
     level: "info",
     msg: "Gate evaluation complete",
-    service: "deployguard-app",
+    service: "trailhead-app",
     ts: new Date().toISOString(),
     state,
     environment: envName,

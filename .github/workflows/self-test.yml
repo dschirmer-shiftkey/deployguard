@@ -1,4 +1,4 @@
-name: "Self-Test: DeployGuard on own PRs"
+name: "Self-Test: Trailhead on own PRs"
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   gate:
-    name: "DeployGuard Self-Test"
+    name: "Trailhead Self-Test"
     runs-on: ubuntu-latest
 
     steps:
@@ -28,7 +28,7 @@ jobs:
       - name: Build action
         run: npm run build
 
-      - name: Run DeployGuard on this PR
+      - name: Run Trailhead on this PR
         id: gate
         uses: ./
         with:

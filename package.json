@@ -1,16 +1,16 @@
 {
-  "name": "deployguard",
+  "name": "trailhead",
   "version": "3.0.2",
   "private": true,
   "description": "Deployment gate for GitHub PRs — scores code risk, checks production health, integrates security signals, and blocks dangerous releases.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dschirmer-shiftkey/deployguard.git"
+    "url": "https://github.com/KomatikAI/trailhead.git"
   },
-  "homepage": "https://github.com/dschirmer-shiftkey/deployguard#readme",
+  "homepage": "https://github.com/KomatikAI/trailhead#readme",
   "bugs": {
-    "url": "https://github.com/dschirmer-shiftkey/deployguard/issues"
+    "url": "https://github.com/KomatikAI/trailhead/issues"
   },
   "main": "dist/index.js",
   "scripts": {

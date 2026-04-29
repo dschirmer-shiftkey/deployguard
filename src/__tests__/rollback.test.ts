@@ -36,8 +36,8 @@ describe("executeRollback", () => {
     delete process.env.VERCEL_TOKEN;
     delete process.env.VERCEL_PROJECT_ID;
     delete process.env.VERCEL_TEAM_ID;
-    delete process.env.DEPLOYGUARD_ROLLBACK_STRATEGY;
-    delete process.env.DEPLOYGUARD_ROLLBACK_WORKFLOW;
+    delete process.env.TRAILHEAD_ROLLBACK_STRATEGY;
+    delete process.env.TRAILHEAD_ROLLBACK_WORKFLOW;
   });
 
   afterEach(() => {
@@ -166,8 +166,8 @@ describe("executeRollback", () => {
   });
 
   it("uses explicit strategy from env var", async () => {
-    process.env.DEPLOYGUARD_ROLLBACK_STRATEGY = "workflow-dispatch";
-    process.env.DEPLOYGUARD_ROLLBACK_WORKFLOW = "deploy-rollback.yml";
+    process.env.TRAILHEAD_ROLLBACK_STRATEGY = "workflow-dispatch";
+    process.env.TRAILHEAD_ROLLBACK_WORKFLOW = "deploy-rollback.yml";
 
     const mockOctokit = {
       rest: {

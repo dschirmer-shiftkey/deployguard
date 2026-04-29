@@ -2,11 +2,11 @@
 
 **Status:** Accepted  
 **Date:** 2026-04-11  
-**Author:** DeployGuard team
+**Author:** Trailhead team
 
 ## Context
 
-DeployGuard's MCP server (`mcp/`) exposes 12 tools, including three health-check
+Trailhead's MCP server (`mcp/`) exposes 12 tools, including three health-check
 tools (`check-http-health`, `check-vercel-health`, `check-supabase-health`). As
 the MCP ecosystem grows, we need to decide how to extend health-check coverage
 to additional providers without bloating the core tool set.
@@ -15,13 +15,13 @@ to additional providers without bloating the core tool set.
 
 ### Current Patterns in the MCP Ecosystem
 
-| Pattern                     | Description                                    | Examples                                    |
-| --------------------------- | ---------------------------------------------- | ------------------------------------------- |
-| **Provider-specific tools** | One MCP tool per provider, hardcoded           | DeployGuard today; Stripe MCP, Supabase MCP |
-| **Generic HTTP probe**      | Single tool that accepts URL + expected status | DeployGuard `check-http-health`             |
-| **Composite tools**         | Orchestrator tool that calls sub-checks        | DeployGuard `evaluate-deployment`           |
-| **Resource-based health**   | Health exposed as an MCP resource, not a tool  | Emerging pattern in MCP spec discussions    |
-| **Plugin/adapter**          | Core tool delegates to provider adapters       | Terraform providers, Grafana data sources   |
+| Pattern                     | Description                                    | Examples                                  |
+| --------------------------- | ---------------------------------------------- | ----------------------------------------- |
+| **Provider-specific tools** | One MCP tool per provider, hardcoded           | Trailhead today; Stripe MCP, Supabase MCP |
+| **Generic HTTP probe**      | Single tool that accepts URL + expected status | Trailhead `check-http-health`             |
+| **Composite tools**         | Orchestrator tool that calls sub-checks        | Trailhead `evaluate-deployment`           |
+| **Resource-based health**   | Health exposed as an MCP resource, not a tool  | Emerging pattern in MCP spec discussions  |
+| **Plugin/adapter**          | Core tool delegates to provider adapters       | Terraform providers, Grafana data sources |
 
 ### Provider Demand (based on GitHub issues, community requests)
 
@@ -61,7 +61,7 @@ Adopt a **hybrid approach**:
    Cloudflare Workers) as separate files that register into the health-check
    pipeline. These are tree-shaken out if the env vars aren't set.
 
-4. **Expose health as an MCP resource** (`deployguard://health`) in addition to
+4. **Expose health as an MCP resource** (`trailhead://health`) in addition to
    tools, so agents can poll without tool invocations. The resource returns the
    latest cached health snapshot.
 
@@ -87,7 +87,7 @@ Adopt a **hybrid approach**:
 
 ### Phase 3 — Resource Exposure (v3.3)
 
-- Add `deployguard://health` MCP resource
+- Add `trailhead://health` MCP resource
 - Cache health results for 60s to avoid redundant polling
 - Include all registered adapters in the resource response
 

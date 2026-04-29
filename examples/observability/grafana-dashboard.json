@@ -3,7 +3,7 @@
     {
       "name": "DS_TEMPO",
       "label": "Tempo",
-      "description": "Tempo data source for DeployGuard traces",
+      "description": "Tempo data source for Trailhead traces",
       "type": "datasource",
       "pluginId": "tempo",
       "pluginName": "Tempo"
@@ -36,7 +36,7 @@
       }
     ]
   },
-  "description": "DeployGuard deployment gate — risk scoring, health checks, and gate decisions via OpenTelemetry spans.",
+  "description": "Trailhead deployment gate — risk scoring, health checks, and gate decisions via OpenTelemetry spans.",
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
@@ -51,7 +51,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && name = \"deployguard.evaluate\" } | count() by ()"
+          "query": "{ resource.service.name = \"trailhead\" && name = \"trailhead.evaluate\" } | count() by ()"
         }
       ],
       "options": {
@@ -76,7 +76,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.decision = \"block\" } | count() by ()"
+          "query": "{ resource.service.name = \"trailhead\" && span.trailhead.decision = \"block\" } | count() by ()"
         }
       ],
       "options": {
@@ -104,7 +104,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | avg(span.deployguard.risk_score) by ()"
+          "query": "{ resource.service.name = \"trailhead\" } | avg(span.trailhead.risk_score) by ()"
         }
       ],
       "options": {
@@ -135,7 +135,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | avg(span.deployguard.health_score) by ()"
+          "query": "{ resource.service.name = \"trailhead\" } | avg(span.trailhead.health_score) by ()"
         }
       ],
       "options": {
@@ -166,7 +166,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | avg(span.deployguard.evaluation_ms) by ()"
+          "query": "{ resource.service.name = \"trailhead\" } | avg(span.trailhead.evaluation_ms) by ()"
         }
       ],
       "options": {
@@ -196,7 +196,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.decision = \"warn\" } | count() by ()"
+          "query": "{ resource.service.name = \"trailhead\" && span.trailhead.decision = \"warn\" } | count() by ()"
         }
       ],
       "options": {
@@ -224,7 +224,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | rate() by (span.deployguard.decision)",
+          "query": "{ resource.service.name = \"trailhead\" } | rate() by (span.trailhead.decision)",
           "refId": "decisions"
         }
       ],
@@ -263,7 +263,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | count() by (span.deployguard.decision)"
+          "query": "{ resource.service.name = \"trailhead\" } | count() by (span.trailhead.decision)"
         }
       ],
       "fieldConfig": {
@@ -301,25 +301,25 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.code_churn > 0 } | avg(span.deployguard.factor.code_churn) by ()",
+          "query": "{ resource.service.name = \"trailhead\" && span.trailhead.factor.code_churn > 0 } | avg(span.trailhead.factor.code_churn) by ()",
           "refId": "code_churn"
         },
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.file_count > 0 } | avg(span.deployguard.factor.file_count) by ()",
+          "query": "{ resource.service.name = \"trailhead\" && span.trailhead.factor.file_count > 0 } | avg(span.trailhead.factor.file_count) by ()",
           "refId": "file_count"
         },
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.sensitive_files > 0 } | avg(span.deployguard.factor.sensitive_files) by ()",
+          "query": "{ resource.service.name = \"trailhead\" && span.trailhead.factor.sensitive_files > 0 } | avg(span.trailhead.factor.sensitive_files) by ()",
           "refId": "sensitive_files"
         },
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" && span.deployguard.factor.test_coverage > 0 } | avg(span.deployguard.factor.test_coverage) by ()",
+          "query": "{ resource.service.name = \"trailhead\" && span.trailhead.factor.test_coverage > 0 } | avg(span.trailhead.factor.test_coverage) by ()",
           "refId": "test_coverage"
         }
       ],
@@ -350,7 +350,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | avg(duration) by ()",
+          "query": "{ resource.service.name = \"trailhead\" } | avg(duration) by ()",
           "refId": "eval_duration"
         }
       ],
@@ -384,7 +384,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | select(span.deployguard.repo, span.deployguard.commit_sha, span.deployguard.decision, span.deployguard.risk_score, span.deployguard.health_score, span.deployguard.evaluation_ms)"
+          "query": "{ resource.service.name = \"trailhead\" } | select(span.trailhead.repo, span.trailhead.commit_sha, span.trailhead.decision, span.trailhead.risk_score, span.trailhead.health_score, span.trailhead.evaluation_ms)"
         }
       ],
       "options": {
@@ -394,7 +394,7 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "span.deployguard.decision" },
+            "matcher": { "id": "byName", "options": "span.trailhead.decision" },
             "properties": [
               {
                 "id": "custom.displayMode",
@@ -430,7 +430,7 @@
         {
           "datasource": "${DS_TEMPO}",
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"deployguard\" } | rate() by (resource.service.namespace)"
+          "query": "{ resource.service.name = \"trailhead\" } | rate() by (resource.service.namespace)"
         }
       ],
       "fieldConfig": {
@@ -450,7 +450,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["deployguard", "deployment", "otel", "risk"],
+  "tags": ["trailhead", "deployment", "otel", "risk"],
   "templating": {
     "list": [
       {
@@ -470,7 +470,7 @@
   "time": { "from": "now-7d", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "DeployGuard — Deployment Gate",
-  "uid": "deployguard-gate",
+  "title": "Trailhead — Deployment Gate",
+  "uid": "trailhead-gate",
   "version": 1
 }

@@ -43,7 +43,7 @@ describe("loadRepoConfig", () => {
     expect(await loadRepoConfig(undefined)).toBeNull();
   });
 
-  it("returns null when .deployguard.yml does not exist", async () => {
+  it("returns null when .trailhead.yml does not exist", async () => {
     mockOctokit(null);
     expect(await loadRepoConfig("ghp_test")).toBeNull();
   });
@@ -58,6 +58,30 @@ describe("loadRepoConfig", () => {
     expect(config).not.toBeNull();
     expect(config!.thresholds.risk).toBe(80);
     expect(config!.thresholds.warn).toBe(60);
+  });
+
+  it("falls back to legacy .deployguard.yml when .trailhead.yml is missing", async () => {
+    const getContent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Not Found (404)"))
+      .mockResolvedValue({
+        data: {
+          type: "file",
+          content: encodeYaml(`thresholds:
+  risk: 75`),
+        },
+      });
+
+    vi.mocked(github.getOctokit).mockReturnValue({
+      rest: { repos: { getContent } },
+    } as unknown as ReturnType<typeof github.getOctokit>);
+
+    const config = await loadRepoConfig("ghp_test");
+
+    expect(config!.thresholds.risk).toBe(75);
+    expect(getContent).toHaveBeenCalledWith(
+      expect.objectContaining({ path: ".deployguard.yml" }),
+    );
   });
 
   it("parses sensitivity configuration", async () => {
@@ -130,7 +154,7 @@ describe("loadRepoConfig", () => {
       rest: {
         repos: {
           getContent: vi.fn().mockResolvedValue({
-            data: [{ name: ".deployguard.yml" }],
+            data: [{ name: ".trailhead.yml" }],
           }),
         },
       },

@@ -1,9 +1,9 @@
 {
-  "title": "DeployGuard — Deployment Gate",
-  "description": "Risk scoring, health checks, and gate decisions from DeployGuard OTel spans.",
+  "title": "Trailhead — Deployment Gate",
+  "description": "Risk scoring, health checks, and gate decisions from Trailhead OTel spans.",
   "layout_type": "ordered",
   "reflow_type": "fixed",
-  "tags": ["service:deployguard", "team:platform"],
+  "tags": ["service:trailhead", "team:platform"],
   "template_variables": [
     {
       "name": "repository",
@@ -23,7 +23,7 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard @deployguard.decision:*" },
+                "search": { "query": "service:trailhead @trailhead.decision:*" },
                 "indexes": ["*"],
                 "compute": { "aggregation": "count" },
                 "group_by": []
@@ -47,7 +47,7 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard @deployguard.decision:block" },
+                "search": { "query": "service:trailhead @trailhead.decision:block" },
                 "indexes": ["*"],
                 "compute": { "aggregation": "count" },
                 "group_by": []
@@ -74,9 +74,9 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard" },
+                "search": { "query": "service:trailhead" },
                 "indexes": ["*"],
-                "compute": { "aggregation": "avg", "metric": "@deployguard.risk_score" },
+                "compute": { "aggregation": "avg", "metric": "@trailhead.risk_score" },
                 "group_by": []
               }
             ]
@@ -103,11 +103,11 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard" },
+                "search": { "query": "service:trailhead" },
                 "indexes": ["*"],
                 "compute": {
                   "aggregation": "avg",
-                  "metric": "@deployguard.health_score"
+                  "metric": "@trailhead.health_score"
                 },
                 "group_by": []
               }
@@ -135,11 +135,11 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard" },
+                "search": { "query": "service:trailhead" },
                 "indexes": ["*"],
                 "compute": {
                   "aggregation": "pc95",
-                  "metric": "@deployguard.evaluation_ms"
+                  "metric": "@trailhead.evaluation_ms"
                 },
                 "group_by": []
               }
@@ -168,7 +168,7 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard @deployguard.decision:warn" },
+                "search": { "query": "service:trailhead @trailhead.decision:warn" },
                 "indexes": ["*"],
                 "compute": { "aggregation": "count" },
                 "group_by": []
@@ -199,7 +199,7 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard @deployguard.decision:allow" },
+                "search": { "query": "service:trailhead @trailhead.decision:allow" },
                 "indexes": ["*"],
                 "compute": { "aggregation": "count" },
                 "group_by": []
@@ -207,7 +207,7 @@
               {
                 "data_source": "spans",
                 "name": "query2",
-                "search": { "query": "service:deployguard @deployguard.decision:warn" },
+                "search": { "query": "service:trailhead @trailhead.decision:warn" },
                 "indexes": ["*"],
                 "compute": { "aggregation": "count" },
                 "group_by": []
@@ -215,7 +215,7 @@
               {
                 "data_source": "spans",
                 "name": "query3",
-                "search": { "query": "service:deployguard @deployguard.decision:block" },
+                "search": { "query": "service:trailhead @trailhead.decision:block" },
                 "indexes": ["*"],
                 "compute": { "aggregation": "count" },
                 "group_by": []
@@ -241,10 +241,10 @@
             "query": {
               "data_source": "spans",
               "name": "query1",
-              "search": { "query": "service:deployguard" },
+              "search": { "query": "service:trailhead" },
               "indexes": ["*"],
               "compute": {
-                "metric": "@deployguard.risk_score",
+                "metric": "@trailhead.risk_score",
                 "aggregation": "distribution"
               },
               "group_by": []
@@ -265,9 +265,9 @@
               {
                 "data_source": "spans",
                 "name": "query1",
-                "search": { "query": "service:deployguard" },
+                "search": { "query": "service:trailhead" },
                 "indexes": ["*"],
-                "compute": { "aggregation": "avg", "metric": "@deployguard.risk_score" },
+                "compute": { "aggregation": "avg", "metric": "@trailhead.risk_score" },
                 "group_by": [
                   {
                     "facet": "resource.service.namespace",
@@ -275,7 +275,7 @@
                     "sort": {
                       "order": "desc",
                       "aggregation": "avg",
-                      "metric": "@deployguard.risk_score"
+                      "metric": "@trailhead.risk_score"
                     }
                   }
                 ]
@@ -301,12 +301,12 @@
                 "data_source": "spans",
                 "name": "query1",
                 "search": {
-                  "query": "service:deployguard @deployguard.factor.code_churn:>0"
+                  "query": "service:trailhead @trailhead.factor.code_churn:>0"
                 },
                 "indexes": ["*"],
                 "compute": {
                   "aggregation": "avg",
-                  "metric": "@deployguard.factor.code_churn"
+                  "metric": "@trailhead.factor.code_churn"
                 },
                 "group_by": [
                   {
@@ -315,7 +315,7 @@
                     "sort": {
                       "order": "desc",
                       "aggregation": "avg",
-                      "metric": "@deployguard.factor.code_churn"
+                      "metric": "@trailhead.factor.code_churn"
                     }
                   }
                 ]
@@ -335,17 +335,17 @@
             "response_format": "event_list",
             "query": {
               "data_source": "spans",
-              "query_string": "service:deployguard",
+              "query_string": "service:trailhead",
               "indexes": ["*"]
             },
             "columns": [
               { "field": "timestamp", "width": "auto" },
-              { "field": "@deployguard.repo", "width": "auto" },
-              { "field": "@deployguard.commit_sha", "width": "auto" },
-              { "field": "@deployguard.decision", "width": "auto" },
-              { "field": "@deployguard.risk_score", "width": "auto" },
-              { "field": "@deployguard.health_score", "width": "auto" },
-              { "field": "@deployguard.evaluation_ms", "width": "auto" }
+              { "field": "@trailhead.repo", "width": "auto" },
+              { "field": "@trailhead.commit_sha", "width": "auto" },
+              { "field": "@trailhead.decision", "width": "auto" },
+              { "field": "@trailhead.risk_score", "width": "auto" },
+              { "field": "@trailhead.health_score", "width": "auto" },
+              { "field": "@trailhead.evaluation_ms", "width": "auto" }
             ]
           }
         ]

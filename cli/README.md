@@ -1,11 +1,11 @@
-# DeployGuard CLI
+# Trailhead CLI
 
-Interactive setup wizard for DeployGuard. Generates `.deployguard.yml` and the GitHub Actions workflow YAML with all v3 features configured.
+Interactive setup wizard for Trailhead. Generates `.trailhead.yml` and the GitHub Actions workflow YAML with all v3 features configured.
 
 ## Usage
 
 ```bash
-npx deployguard init
+npx trailhead init
 ```
 
 No installation required. The wizard walks you through:
@@ -27,8 +27,8 @@ No installation required. The wizard walks you through:
 
 The wizard generates two files:
 
-- **`.deployguard.yml`** — per-repo configuration (sensitivity, thresholds, freeze windows, environments, services, security, canary)
-- **`.github/workflows/deployguard.yml`** — GitHub Actions workflow with all selected features
+- **`.trailhead.yml`** — per-repo configuration (sensitivity, thresholds, freeze windows, environments, services, security, canary)
+- **`.github/workflows/trailhead.yml`** — GitHub Actions workflow with all selected features
 
 ## Development
 
@@ -49,4 +49,4 @@ npx tsc
 npm publish
 ```
 
-The package is published as `deployguard` on npm, making `npx deployguard init` work without installation.
+The package is published as `trailhead` on npm, making `npx trailhead init` work without installation.

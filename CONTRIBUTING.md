@@ -1,12 +1,12 @@
-# Contributing to DeployGuard
+# Contributing to Trailhead
 
-Thank you for your interest in contributing to DeployGuard.
+Thank you for your interest in contributing to Trailhead.
 
 ## Getting Started
 
 ```bash
-git clone https://github.com/dschirmer-shiftkey/deployguard.git
-cd deployguard
+git clone https://github.com/KomatikAI/trailhead.git
+cd trailhead
 npm install
 ```
 
@@ -36,7 +36,7 @@ src/                 # GitHub Action source (TypeScript)
   healers/           # Test failure auto-repair
   __tests__/         # Vitest test files
 app/                 # GitHub App (Hono server)
-cli/                 # CLI wizard (npx deployguard init)
+cli/                 # CLI wizard (npx trailhead init)
 mcp/                 # MCP server (internal)
 dist/                # Bundled action (committed)
 examples/            # CI templates, observability dashboards
@@ -45,7 +45,7 @@ docs/                # Architecture docs, ADRs
 
 ## Key Principles
 
-1. **Fail-open** — DeployGuard must never block a deployment due to its own errors. The `fail-mode: open` default is non-negotiable.
+1. **Fail-open** — Trailhead must never block a deployment due to its own errors. The `fail-mode: open` default is non-negotiable.
 2. **No secrets required** — basic risk scoring must work with zero configuration beyond `github-token`.
 3. **Pure risk engine** — `src/risk-engine.ts` must have no framework dependencies. It is shared across the Action, App, and MCP server.
 4. **Backward compatible** — new inputs must have sensible defaults. Existing workflows must not break.
@@ -87,4 +87,4 @@ Releases are tagged on `main` and published via GitHub Actions. The `v3` major t
 
 ## Questions?
 
-Open a [discussion](https://github.com/dschirmer-shiftkey/deployguard/discussions) or file an issue.
+Open a [discussion](https://github.com/KomatikAI/trailhead/discussions) or file an issue.

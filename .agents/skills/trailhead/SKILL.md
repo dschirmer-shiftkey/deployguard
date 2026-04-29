@@ -28,18 +28,18 @@ If a health check returns `degraded` or `down` after deploy, surface it immediat
 
 Trailhead scores PRs on a 0–100 scale using 10 weighted factors:
 
-| Factor | Weight | What triggers high scores |
-|---|---|---|
-| `security_alerts` | 4 | Critical/high code scanning alerts |
-| `code_churn` | 3 | Large diffs, especially in sensitive files (auth 3x, infra 2x weight) |
-| `sensitive_files` | 3 | Changes to auth, migrations, payments, CI, secrets, env files |
-| `file_count` | 2 | Many files changed (log scale) |
-| `test_coverage` | 2 | Low ratio of test files to source files in the PR |
-| `dependency_changes` | 2 | Lock file or manifest changes |
-| `deployment_history` | 2 | Recent deployment failures in target env |
-| `canary_status` | 2 | Canary/progressive rollout signals |
-| `author_history` | 1 | Author unfamiliar with the repo (< 90-day commit history) |
-| `pr_age` | 1 | Stale PRs penalized |
+| Factor               | Weight | What triggers high scores                                             |
+| -------------------- | ------ | --------------------------------------------------------------------- |
+| `security_alerts`    | 4      | Critical/high code scanning alerts                                    |
+| `code_churn`         | 3      | Large diffs, especially in sensitive files (auth 3x, infra 2x weight) |
+| `sensitive_files`    | 3      | Changes to auth, migrations, payments, CI, secrets, env files         |
+| `file_count`         | 2      | Many files changed (log scale)                                        |
+| `test_coverage`      | 2      | Low ratio of test files to source files in the PR                     |
+| `dependency_changes` | 2      | Lock file or manifest changes                                         |
+| `deployment_history` | 2      | Recent deployment failures in target env                              |
+| `canary_status`      | 2      | Canary/progressive rollout signals                                    |
+| `author_history`     | 1      | Author unfamiliar with the repo (< 90-day commit history)             |
+| `pr_age`             | 1      | Stale PRs penalized                                                   |
 
 Decisions: **allow** (< 55), **warn** (55–70), **block** (> 70).
 
@@ -90,7 +90,8 @@ The standard Trailhead workflow for any PR:
 
 ## Configuration
 
-Trailhead reads `.deployguard.yml` (or `.trailhead.yml`) from the repo root for:
+Trailhead reads `.trailhead.yml` (or legacy `.deployguard.yml`) from the repo root for:
+
 - Custom risk and warn thresholds per environment
 - Sensitivity file patterns (globs for auth, infra, payments, etc.)
 - Freeze window schedules
@@ -101,4 +102,4 @@ If no config file exists, sensible defaults apply (block at 70, warn at 55).
 
 ## GitHub Action
 
-Trailhead also runs as a GitHub Action (`dschirmer-shiftkey/deployguard@v3`). The MCP tools and the Action use the same risk engine — scores are identical regardless of interface. Use the MCP tools for interactive agent workflows; use the Action for CI automation.
+Trailhead also runs as a GitHub Action (`KomatikAI/trailhead@v3`). The MCP tools and the Action use the same risk engine — scores are identical regardless of interface. Use the MCP tools for interactive agent workflows; use the Action for CI automation.

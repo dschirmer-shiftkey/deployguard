@@ -20,7 +20,7 @@ import { jestHealer } from "./healers/jest.js";
 import { playwrightHealer } from "./healers/playwright.js";
 import { cypressHealer } from "./healers/cypress.js";
 import { fetchCodeScanningAlerts, formatSecuritySection } from "./security.js";
-import type { DeployGuardConfig, TestRepairResult } from "./types.js";
+import type { TrailheadConfig, TestRepairResult } from "./types.js";
 
 function initHealers(): void {
   registerHealer(jestHealer);
@@ -28,19 +28,23 @@ function initHealers(): void {
   registerHealer(cypressHealer);
 }
 
+function readEnv(primary: string, legacy?: string): string | undefined {
+  return process.env[primary] ?? (legacy ? process.env[legacy] : undefined);
+}
+
 async function runSelfHeal(
-  config: DeployGuardConfig,
+  config: TrailheadConfig,
   prNumber: number,
 ): Promise<TestRepairResult[]> {
   const results: TestRepairResult[] = [];
-  const testFailures = process.env.DEPLOYGUARD_TEST_FAILURES;
+  const testFailures = readEnv("TRAILHEAD_TEST_FAILURES", "DEPLOYGUARD_TEST_FAILURES");
   if (!testFailures) return results;
 
   let failures: Array<{ file: string; error: string }>;
   try {
     failures = JSON.parse(testFailures) as Array<{ file: string; error: string }>;
   } catch {
-    core.debug("Could not parse DEPLOYGUARD_TEST_FAILURES — skipping self-heal");
+    core.debug("Could not parse TRAILHEAD_TEST_FAILURES — skipping self-heal");
     return results;
   }
 
@@ -57,7 +61,7 @@ async function runSelfHeal(
             repo,
             issue_number: prNumber,
             body: [
-              `### DeployGuard Self-Heal Suggestion`,
+              `### Trailhead Self-Heal Suggestion`,
               ``,
               `Test file \`${repairResult.testFile}\` failed ` +
                 `(\`${repairResult.failureType}\`). ` +
@@ -84,9 +88,9 @@ async function run(): Promise<void> {
   try {
     initHealers();
 
-    const config: DeployGuardConfig = {
+    const config: TrailheadConfig = {
       apiKey: core.getInput("api-key") || "",
-      apiUrl: process.env.DEPLOYGUARD_API_URL || "",
+      apiUrl: readEnv("TRAILHEAD_API_URL", "DEPLOYGUARD_API_URL") || "",
       githubToken: core.getInput("github-token") || process.env.GITHUB_TOKEN || undefined,
       healthCheckUrls: (core.getInput("health-check-urls") || "")
         .split(",")
@@ -286,11 +290,11 @@ async function run(): Promise<void> {
     const failMode = core.getInput("fail-mode") || "open";
     if (failMode === "open") {
       core.warning(
-        `DeployGuard evaluation failed — proceeding with deployment (fail-open). Error: ${error}`,
+        `Trailhead evaluation failed — proceeding with deployment (fail-open). Error: ${error}`,
       );
     } else {
       core.setFailed(
-        `DeployGuard evaluation failed — blocking deployment (fail-closed). Error: ${error}`,
+        `Trailhead evaluation failed — blocking deployment (fail-closed). Error: ${error}`,
       );
     }
   }

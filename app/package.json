@@ -1,9 +1,9 @@
 {
-  "name": "deployguard-app",
+  "name": "trailhead-app",
   "version": "3.0.2",
   "private": true,
   "type": "module",
-  "description": "DeployGuard GitHub App — Deployment Protection Rule webhook handler",
+  "description": "Trailhead GitHub App — Deployment Protection Rule webhook handler",
   "scripts": {
     "prebuild": "node -e \"require('fs').copyFileSync('../src/risk-engine.ts','src/risk-engine.ts')\"",
     "build": "tsc",

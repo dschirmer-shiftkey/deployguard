@@ -1,8 +1,8 @@
-# DeployGuard — Documentation
+# Trailhead — Documentation
 
 ## Architecture Overview
 
-DeployGuard is a deployment gate available in three forms:
+Trailhead is a deployment gate available in three forms:
 
 1. **GitHub Action** (`@v3`) — the primary distribution. Runs in CI on every PR.
 2. **GitHub App** (`app/`) — a webhook server that acts as a Custom Deployment Protection Rule.
@@ -22,7 +22,7 @@ All three share a single **risk engine** (`src/risk-engine.ts`) — a pure TypeS
 
 ### CLI
 
-`npx deployguard init` generates `.deployguard.yml` and the workflow YAML interactively. See `cli/README.md`.
+`npx trailhead init` generates `.trailhead.yml` and the workflow YAML interactively. See `cli/README.md`.
 
 ## Risk Scoring
 
@@ -63,9 +63,9 @@ The weighted average determines the outcome:
 
 ## Security Gate
 
-DeployGuard integrates with GitHub Code Scanning (CodeQL, Semgrep, etc.). Open alerts automatically increase the risk score via the `security_alerts` factor (weight 4 — the highest).
+Trailhead integrates with GitHub Code Scanning (CodeQL, Semgrep, etc.). Open alerts automatically increase the risk score via the `security_alerts` factor (weight 4 — the highest).
 
-Configure in `.deployguard.yml`:
+Configure in `.trailhead.yml`:
 
 ```yaml
 security:
@@ -79,9 +79,9 @@ When `block_on_critical: true`, any critical alert forces the security factor sc
 
 ## Canary / Deploy Outcome Tracking
 
-DeployGuard can track deployment outcomes from Vercel webhooks or a generic webhook format. This feeds the `canary_status` and `deployment_history` risk factors.
+Trailhead can track deployment outcomes from Vercel webhooks or a generic webhook format. This feeds the `canary_status` and `deployment_history` risk factors.
 
-Configure in `.deployguard.yml`:
+Configure in `.trailhead.yml`:
 
 ```yaml
 canary:
@@ -95,7 +95,7 @@ The GitHub App exposes a `/webhook/deploy-outcome` endpoint for receiving these 
 
 ## DORA-5 Metrics
 
-DeployGuard computes all five DORA metrics from GitHub data:
+Trailhead computes all five DORA metrics from GitHub data:
 
 1. **Deployment Frequency** — successful workflow runs per week
 2. **Change Failure Rate** — ratio of reverts/hotfixes to total merged PRs
@@ -109,7 +109,7 @@ Ratings follow the DORA benchmark: **Elite** (daily deploys, <5% CFR), **High**,
 
 ## Per-Environment Configuration
 
-Override thresholds per deployment environment in `.deployguard.yml`:
+Override thresholds per deployment environment in `.trailhead.yml`:
 
 ```yaml
 thresholds:
@@ -155,10 +155,10 @@ freeze:
 
 ## OpenTelemetry Export
 
-DeployGuard can export evaluation spans to any OTLP-compatible backend:
+Trailhead can export evaluation spans to any OTLP-compatible backend:
 
 ```yaml
-- uses: dschirmer-shiftkey/deployguard@v3
+- uses: KomatikAI/trailhead@v3
   with:
     otel-endpoint: "https://otel.example.com:4318/v1/traces"
     otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"

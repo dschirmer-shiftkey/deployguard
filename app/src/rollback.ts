@@ -246,8 +246,8 @@ async function rollbackGitHub(
               environment,
               auto_merge: false,
               required_contexts: [],
-              description: `DeployGuard rollback to ${dep.sha.substring(0, 7)}`,
-              payload: { rollback: true, triggeredBy: "deployguard-app" },
+              description: `Trailhead rollback to ${dep.sha.substring(0, 7)}`,
+              payload: { rollback: true, triggeredBy: "trailhead-app" },
             }),
             signal: AbortSignal.timeout(10_000),
           },
@@ -300,7 +300,7 @@ export async function executeRollback(
   }
 
   console.log(
-    `[DeployGuard] Deployment ${outcome.deploymentId} failed in ${outcome.environment} — initiating rollback`,
+    `[Trailhead] Deployment ${outcome.deploymentId} failed in ${outcome.environment} — initiating rollback`,
   );
 
   if (process.env.VERCEL_TOKEN && process.env.VERCEL_PROJECT_ID) {
