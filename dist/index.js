@@ -648,8 +648,8 @@ class OidcClient {
             const res = yield httpclient
                 .getJson(id_token_url)
                 .catch(error => {
-                throw new Error(`Failed to get ID Token. \n 
-        Error Code : ${error.statusCode}\n 
+                throw new Error(`Failed to get ID Token. \n
+        Error Code : ${error.statusCode}\n
         Error Message: ${error.message}`);
             });
             const id_token = (_a = res.result) === null || _a === void 0 ? void 0 : _a.value;
@@ -31672,7 +31672,7 @@ __webpack_unused_export__ = defaultContentType
 /************************************************************************/
 /******/ 	// The module cache
 /******/ 	var __webpack_module_cache__ = {};
-/******/ 	
+/******/
 /******/ 	// The require function
 /******/ 	function __nccwpck_require__(moduleId) {
 /******/ 		// Check if module is in cache
@@ -31686,7 +31686,7 @@ __webpack_unused_export__ = defaultContentType
 /******/ 			// no module.loaded needed
 /******/ 			exports: {}
 /******/ 		};
-/******/ 	
+/******/
 /******/ 		// Execute the module function
 /******/ 		var threw = true;
 /******/ 		try {
@@ -31695,16 +31695,45 @@ __webpack_unused_export__ = defaultContentType
 /******/ 		} finally {
 /******/ 			if(threw) delete __webpack_module_cache__[moduleId];
 /******/ 		}
-/******/ 	
+/******/
 /******/ 		// Return the exports of the module
 /******/ 		return module.exports;
 /******/ 	}
-/******/ 	
+/******/
 /************************************************************************/
+/******/ 	/* webpack/runtime/compat get default export */
+/******/ 	(() => {
+/******/ 		// getDefaultExport function for compatibility with non-harmony modules
+/******/ 		__nccwpck_require__.n = (module) => {
+/******/ 			var getter = module && module.__esModule ?
+/******/ 				() => (module['default']) :
+/******/ 				() => (module);
+/******/ 			__nccwpck_require__.d(getter, { a: getter });
+/******/ 			return getter;
+/******/ 		};
+/******/ 	})();
+/******/
+/******/ 	/* webpack/runtime/define property getters */
+/******/ 	(() => {
+/******/ 		// define getter functions for harmony exports
+/******/ 		__nccwpck_require__.d = (exports, definition) => {
+/******/ 			for(var key in definition) {
+/******/ 				if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
+/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 				}
+/******/ 			}
+/******/ 		};
+/******/ 	})();
+/******/
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	(() => {
+/******/ 		__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/
 /******/ 	/* webpack/runtime/compat */
-/******/ 	
+/******/
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
-/******/ 	
+/******/
 /************************************************************************/
 var __webpack_exports__ = {};
 // This entry need to be wrapped in an IIFE because it need to be in strict mode.
@@ -40106,7 +40135,7 @@ function cleanParams(params, data) {
     const p2 = typeof p === "string" ? { message: p } : p;
     return p2;
 }
-function custom(check, _params = {}, 
+function custom(check, _params = {},
 /**
  * @deprecated
  *
@@ -40338,6 +40367,11 @@ const RepoConfig = objectType({
     canary: CanaryConfig.optional(),
 });
 
+;// CONCATENATED MODULE: external "node:fs/promises"
+const promises_namespaceObject = require("node:fs/promises");
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = require("node:path");
+var external_node_path_default = /*#__PURE__*/__nccwpck_require__.n(external_node_path_namespaceObject);
 ;// CONCATENATED MODULE: ./src/risk-engine.ts
 // Pure risk scoring engine — no framework dependencies.
 // Shared across the GitHub Action, MCP server, and GitHub App.
@@ -40660,6 +40694,8 @@ function isRollback(prTitle) {
 
 
 
+
+
 const yamlParse = null;
 function parseYaml(input) {
     if (yamlParse)
@@ -40733,6 +40769,9 @@ function parseYaml(input) {
     return result;
 }
 async function loadRepoConfig(token) {
+    const localConfig = await loadLocalRepoConfig();
+    if (localConfig)
+        return localConfig;
     if (!token)
         return null;
     try {
@@ -40766,6 +40805,32 @@ async function loadRepoConfig(token) {
         }
         return null;
     }
+}
+async function loadLocalRepoConfig() {
+    const workspace = process.env.GITHUB_WORKSPACE;
+    if (!workspace)
+        return null;
+    for (const configPath of [".trailhead.yml", ".deployguard.yml"]) {
+        try {
+            const content = await (0,promises_namespaceObject.readFile)(external_node_path_default().join(workspace, configPath), "utf-8");
+            const raw = parseYaml(content);
+            const parsed = RepoConfig.safeParse(raw);
+            if (!parsed.success) {
+                core.warning(`${configPath} parse error: ${parsed.error.message} — using defaults`);
+                return null;
+            }
+            core.debug(`Loaded local ${configPath}: ${JSON.stringify(parsed.data)}`);
+            return parsed.data;
+        }
+        catch (error) {
+            const code = error.code;
+            if (code !== "ENOENT") {
+                core.debug(`Local Trailhead config load failed: ${error}`);
+                return null;
+            }
+        }
+    }
+    return null;
 }
 async function findConfigPath(octokit, owner, repo) {
     for (const path of [".trailhead.yml", ".deployguard.yml"]) {

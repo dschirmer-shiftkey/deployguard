@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 vi.mock("@actions/core", () => ({
   warning: vi.fn(),
@@ -36,6 +39,7 @@ function mockOctokit(content: string | null) {
 describe("loadRepoConfig", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.GITHUB_WORKSPACE;
   });
 
   it("returns null when no token is provided", async () => {
@@ -82,6 +86,30 @@ describe("loadRepoConfig", () => {
     expect(getContent).toHaveBeenCalledWith(
       expect.objectContaining({ path: ".deployguard.yml" }),
     );
+  });
+
+  it("prefers local workspace config when running in GitHub Actions", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "trailhead-config-"));
+    process.env.GITHUB_WORKSPACE = workspace;
+    await writeFile(
+      path.join(workspace, ".trailhead.yml"),
+      `ignore:
+  - "mcp/dist/**"`,
+      "utf-8",
+    );
+    const getContent = mockOctokit(
+      `thresholds:
+  risk: 99`,
+    );
+
+    try {
+      const config = await loadRepoConfig("ghp_test");
+
+      expect(config!.ignore).toEqual(["mcp/dist/**"]);
+      expect(getContent).not.toHaveBeenCalled();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("parses sensitivity configuration", async () => {
