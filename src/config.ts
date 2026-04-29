@@ -1,5 +1,7 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { RepoConfig } from "./types.js";
 import type { RepoConfig as RepoConfigType } from "./types.js";
 
@@ -82,6 +84,9 @@ function parseYaml(input: string): unknown {
 }
 
 export async function loadRepoConfig(token?: string): Promise<RepoConfigType | null> {
+  const localConfig = await loadLocalRepoConfig();
+  if (localConfig) return localConfig;
+
   if (!token) return null;
 
   try {
@@ -119,6 +124,37 @@ export async function loadRepoConfig(token?: string): Promise<RepoConfigType | n
     }
     return null;
   }
+}
+
+async function loadLocalRepoConfig(): Promise<RepoConfigType | null> {
+  const workspace = process.env.GITHUB_WORKSPACE;
+  if (!workspace) return null;
+
+  for (const configPath of [".trailhead.yml", ".deployguard.yml"]) {
+    try {
+      const content = await readFile(path.join(workspace, configPath), "utf-8");
+      const raw = parseYaml(content);
+      const parsed = RepoConfig.safeParse(raw);
+
+      if (!parsed.success) {
+        core.warning(
+          `${configPath} parse error: ${parsed.error.message} — using defaults`,
+        );
+        return null;
+      }
+
+      core.debug(`Loaded local ${configPath}: ${JSON.stringify(parsed.data)}`);
+      return parsed.data;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        core.debug(`Local Trailhead config load failed: ${error}`);
+        return null;
+      }
+    }
+  }
+
+  return null;
 }
 
 async function findConfigPath(
