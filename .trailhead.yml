@@ -1,0 +1,9 @@
+# Trailhead repository policy.
+#
+# The MCP package copies shared source during prebuild and commits selected
+# runtime artifacts. Score the canonical source files, not their generated copies.
+ignore:
+  - "mcp/src/risk-engine.ts"
+  - "mcp/src/adapters/**"
+  - "mcp/dist/risk-engine.*"
+  - "mcp/dist/adapters/**"
