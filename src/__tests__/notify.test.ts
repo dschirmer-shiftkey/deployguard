@@ -126,10 +126,10 @@ describe("storeEvaluation", () => {
   it("sends evaluation as POST body", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
     const eval_ = makeEvaluation();
-    await storeEvaluation("https://example.com/api/deployguard/store", eval_);
+    await storeEvaluation("https://example.com/api/trailhead/store", eval_);
 
     expect(fetch).toHaveBeenCalledWith(
-      "https://example.com/api/deployguard/store",
+      "https://example.com/api/trailhead/store",
       expect.objectContaining({ method: "POST" }),
     );
     const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -141,7 +141,7 @@ describe("storeEvaluation", () => {
   it("includes Authorization header when EVALUATION_STORE_SECRET is set", async () => {
     process.env.EVALUATION_STORE_SECRET = "my-secret";
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
-    await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
+    await storeEvaluation("https://example.com/api/trailhead/store", makeEvaluation());
 
     const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("Bearer my-secret");
@@ -157,7 +157,7 @@ describe("storeEvaluation", () => {
 
   it("omits Authorization header when no secret is set", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"stored":true}'));
-    await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
+    await storeEvaluation("https://example.com/api/trailhead/store", makeEvaluation());
 
     const headers = vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers["Authorization"]).toBeUndefined();
@@ -179,7 +179,7 @@ describe("storeEvaluation", () => {
 
     expect(fetch).toHaveBeenCalledTimes(2);
     const supUrl = vi.mocked(fetch).mock.calls[1][0] as string;
-    expect(supUrl).toContain("supabase.co/rest/v1/deployguard_evaluations");
+    expect(supUrl).toContain("supabase.co/rest/v1/trailhead_evaluations");
     const row = JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string);
     expect(row.gate_decision).toBe("block");
     expect(row.risk_score).toBe(85);
@@ -189,21 +189,21 @@ describe("storeEvaluation", () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response("<html/>", { status: 200, headers: { "Content-Type": "text/html" } }),
     );
-    await storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation());
+    await storeEvaluation("https://example.com/api/trailhead/store", makeEvaluation());
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("handles non-200 JSON response gracefully (fail-open)", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse('{"error":"nope"}', 500));
     await expect(
-      storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation()),
+      storeEvaluation("https://example.com/api/trailhead/store", makeEvaluation()),
     ).resolves.toBeUndefined();
   });
 
   it("handles network error gracefully (fail-open)", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
     await expect(
-      storeEvaluation("https://example.com/api/deployguard/store", makeEvaluation()),
+      storeEvaluation("https://example.com/api/trailhead/store", makeEvaluation()),
     ).resolves.toBeUndefined();
   });
 });

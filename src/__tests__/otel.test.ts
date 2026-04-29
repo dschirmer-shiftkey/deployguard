@@ -59,7 +59,7 @@ describe("exportOtelSpan", () => {
 
     const spans = body.resourceSpans[0].scopeSpans[0].spans;
     expect(spans).toHaveLength(1);
-    expect(spans[0].name).toBe("deployguard.evaluate");
+    expect(spans[0].name).toBe("trailhead.evaluate");
   });
 
   it("includes risk score and decision as span attributes", async () => {
@@ -72,14 +72,12 @@ describe("exportOtelSpan", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     const attrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
 
-    const riskAttr = attrs.find(
-      (a: { key: string }) => a.key === "deployguard.risk_score",
-    );
+    const riskAttr = attrs.find((a: { key: string }) => a.key === "trailhead.risk_score");
     expect(riskAttr).toBeDefined();
     expect(riskAttr.value.intValue).toBe("72");
 
     const decisionAttr = attrs.find(
-      (a: { key: string }) => a.key === "deployguard.decision",
+      (a: { key: string }) => a.key === "trailhead.decision",
     );
     expect(decisionAttr).toBeDefined();
     expect(decisionAttr.value.stringValue).toBe("block");
@@ -92,7 +90,7 @@ describe("exportOtelSpan", () => {
     const attrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes;
 
     const churnAttr = attrs.find(
-      (a: { key: string }) => a.key === "deployguard.factor.code_churn",
+      (a: { key: string }) => a.key === "trailhead.factor.code_churn",
     );
     expect(churnAttr).toBeDefined();
     expect(churnAttr.value.intValue).toBe("25");
@@ -157,6 +155,6 @@ describe("exportOtelSpan", () => {
     const serviceName = resourceAttrs.find(
       (a: { key: string }) => a.key === "service.name",
     );
-    expect(serviceName.value.stringValue).toBe("deployguard");
+    expect(serviceName.value.stringValue).toBe("trailhead");
   });
 });

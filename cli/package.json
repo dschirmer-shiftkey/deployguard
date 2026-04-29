@@ -1,10 +1,10 @@
 {
-  "name": "deployguard",
+  "name": "trailhead",
   "version": "3.0.2",
-  "description": "DeployGuard CLI — setup wizard and utilities for the DeployGuard deployment gate",
+  "description": "Trailhead CLI — setup wizard and utilities for the Trailhead deployment gate",
   "type": "module",
   "bin": {
-    "deployguard": "dist/index.js"
+    "trailhead": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",

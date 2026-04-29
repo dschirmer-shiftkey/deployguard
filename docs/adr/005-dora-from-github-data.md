@@ -2,11 +2,11 @@
 
 **Status:** Accepted
 **Date:** 2026-04-02
-**Author:** DeployGuard team
+**Author:** Trailhead team
 
 ## Context
 
-DORA metrics (Deployment Frequency, Change Failure Rate, Lead Time to Change, Failed Deployment Recovery Time, Change Rework Rate) are the industry standard for measuring engineering team performance. Most DORA tools require dedicated deployment tracking infrastructure. We need to decide whether DeployGuard computes DORA metrics from existing GitHub data or requires external deployment tracking.
+DORA metrics (Deployment Frequency, Change Failure Rate, Lead Time to Change, Failed Deployment Recovery Time, Change Rework Rate) are the industry standard for measuring engineering team performance. Most DORA tools require dedicated deployment tracking infrastructure. We need to decide whether Trailhead computes DORA metrics from existing GitHub data or requires external deployment tracking.
 
 ## Decision
 

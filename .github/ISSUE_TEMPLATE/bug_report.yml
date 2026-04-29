@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in DeployGuard
+description: Report a bug in Trailhead
 labels: ["bug"]
 body:
   - type: markdown
@@ -10,7 +10,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: DeployGuard Version
+      label: Trailhead Version
       description: Which version are you using? (e.g. v3.0.1)
       placeholder: "v3"
     validations:
@@ -20,11 +20,11 @@ body:
     id: component
     attributes:
       label: Component
-      description: Which part of DeployGuard is affected?
+      description: Which part of Trailhead is affected?
       options:
         - GitHub Action
         - GitHub App
-        - CLI (npx deployguard init)
+        - CLI (npx trailhead init)
         - Risk scoring
         - DORA metrics
         - Security gate
@@ -70,5 +70,5 @@ body:
     id: config
     attributes:
       label: Configuration
-      description: Your `.deployguard.yml` and workflow YAML (redact secrets).
+      description: Your `.trailhead.yml` and workflow YAML (redact secrets).
       render: yaml

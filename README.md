@@ -1,7 +1,7 @@
-# DeployGuard
+# Trailhead
 
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-DeployGuard-green?logo=github)](https://github.com/marketplace/actions/deployguard)
-[![CI](https://github.com/dschirmer-shiftkey/deployguard/actions/workflows/ci.yml/badge.svg)](https://github.com/dschirmer-shiftkey/deployguard/actions/workflows/ci.yml)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Trailhead-green?logo=github)](https://github.com/marketplace/actions/trailhead)
+[![CI](https://github.com/KomatikAI/trailhead/actions/workflows/ci.yml/badge.svg)](https://github.com/KomatikAI/trailhead/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Deployment gate for GitHub PRs. Scores code risk, checks production health, integrates security signals, computes DORA-5 metrics, and blocks dangerous releases — all in a single GitHub Action.
@@ -11,15 +11,15 @@ Deployment gate for GitHub PRs. Scores code risk, checks production health, inte
 **Option A — Interactive setup:**
 
 ```bash
-npx deployguard init
+npx trailhead init
 ```
 
 **Option B — Manual setup:**
 
-Create `.github/workflows/deployguard.yml` in your repo:
+Create `.github/workflows/trailhead.yml` in your repo:
 
 ```yaml
-name: DeployGuard
+name: Trailhead
 on:
   pull_request:
 
@@ -33,12 +33,12 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: dschirmer-shiftkey/deployguard@v3
+      - uses: KomatikAI/trailhead@v3
         with:
           risk-threshold: "70"
 ```
 
-Open a pull request. DeployGuard comments a risk report directly on the PR.
+Open a pull request. Trailhead comments a risk report directly on the PR.
 
 No API key. No secrets. That's it.
 
@@ -46,7 +46,7 @@ No API key. No secrets. That's it.
 
 ## How It Works
 
-DeployGuard analyzes every pull request and produces a **risk score** (0-100) based on:
+Trailhead analyzes every pull request and produces a **risk score** (0-100) based on:
 
 | Factor               | Weight | What it measures                                                                                    |
 | -------------------- | ------ | --------------------------------------------------------------------------------------------------- |
@@ -69,28 +69,28 @@ The weighted average determines the decision:
 
 ## Inputs
 
-| Input                     | Required | Default               | Description                                                        |
-| ------------------------- | -------- | --------------------- | ------------------------------------------------------------------ |
-| `github-token`            | No       | `${{ github.token }}` | GitHub token for PR analysis and comments                          |
-| `risk-threshold`          | No       | `70`                  | Block the PR above this risk score (0-100)                         |
-| `warn-threshold`          | No       | risk - 15             | Warn above this risk score (0-100)                                 |
-| `health-check-urls`       | No       | —                     | Comma-separated URLs to health-check before scoring                |
-| `fail-mode`               | No       | `open`                | What happens when DeployGuard errors: `open` or `closed`           |
-| `self-heal`               | No       | `false`               | Auto-repair failing tests (needs `DEPLOYGUARD_TEST_FAILURES` env)  |
-| `add-risk-labels`         | No       | `true`                | Add `deployguard:low-risk` / `warn` / `high-risk` labels to the PR |
-| `reviewers-on-risk`       | No       | —                     | Comma-separated usernames to request review on warn/block          |
-| `webhook-url`             | No       | —                     | URL to POST results to (Slack, Discord, custom)                    |
-| `webhook-events`          | No       | `warn,block`          | Which decisions trigger the webhook                                |
-| `evaluation-store-url`    | No       | —                     | URL to POST evaluations for trend dashboards                       |
-| `evaluation-store-secret` | No       | —                     | Bearer token for `evaluation-store-url`                            |
-| `dora-metrics`            | No       | `false`               | Compute DORA-5 metrics alongside the gate evaluation               |
-| `dora-environment`        | No       | —                     | Filter DORA metrics to a specific deployment environment           |
-| `environment`             | No       | —                     | Target deployment environment (for per-env threshold overrides)    |
-| `security-gate`           | No       | `true`                | Enable Code Scanning alerts as a risk factor                       |
-| `canary-webhook-secret`   | No       | —                     | HMAC secret for deploy outcome webhooks                            |
-| `otel-endpoint`           | No       | —                     | OTLP HTTP endpoint for exporting evaluation spans                  |
-| `otel-headers`            | No       | —                     | Auth headers for the OTLP endpoint (key=value, comma-separated)    |
-| `api-key`                 | No       | —                     | API key for remote enrichment (omit for local-only)                |
+| Input                     | Required | Default               | Description                                                      |
+| ------------------------- | -------- | --------------------- | ---------------------------------------------------------------- |
+| `github-token`            | No       | `${{ github.token }}` | GitHub token for PR analysis and comments                        |
+| `risk-threshold`          | No       | `70`                  | Block the PR above this risk score (0-100)                       |
+| `warn-threshold`          | No       | risk - 15             | Warn above this risk score (0-100)                               |
+| `health-check-urls`       | No       | —                     | Comma-separated URLs to health-check before scoring              |
+| `fail-mode`               | No       | `open`                | What happens when Trailhead errors: `open` or `closed`           |
+| `self-heal`               | No       | `false`               | Auto-repair failing tests (needs `TRAILHEAD_TEST_FAILURES` env)  |
+| `add-risk-labels`         | No       | `true`                | Add `trailhead:low-risk` / `warn` / `high-risk` labels to the PR |
+| `reviewers-on-risk`       | No       | —                     | Comma-separated usernames to request review on warn/block        |
+| `webhook-url`             | No       | —                     | URL to POST results to (Slack, Discord, custom)                  |
+| `webhook-events`          | No       | `warn,block`          | Which decisions trigger the webhook                              |
+| `evaluation-store-url`    | No       | —                     | URL to POST evaluations for trend dashboards                     |
+| `evaluation-store-secret` | No       | —                     | Bearer token for `evaluation-store-url`                          |
+| `dora-metrics`            | No       | `false`               | Compute DORA-5 metrics alongside the gate evaluation             |
+| `dora-environment`        | No       | —                     | Filter DORA metrics to a specific deployment environment         |
+| `environment`             | No       | —                     | Target deployment environment (for per-env threshold overrides)  |
+| `security-gate`           | No       | `true`                | Enable Code Scanning alerts as a risk factor                     |
+| `canary-webhook-secret`   | No       | —                     | HMAC secret for deploy outcome webhooks                          |
+| `otel-endpoint`           | No       | —                     | OTLP HTTP endpoint for exporting evaluation spans                |
+| `otel-headers`            | No       | —                     | Auth headers for the OTLP endpoint (key=value, comma-separated)  |
+| `api-key`                 | No       | —                     | API key for remote enrichment (omit for local-only)              |
 
 ## Outputs
 
@@ -115,9 +115,9 @@ The weighted average determines the decision:
 
 ## Security Gate
 
-DeployGuard integrates with GitHub Code Scanning to include security alerts as a risk factor. When Code Scanning (CodeQL, Semgrep, etc.) is configured, open alerts automatically increase the risk score.
+Trailhead integrates with GitHub Code Scanning to include security alerts as a risk factor. When Code Scanning (CodeQL, Semgrep, etc.) is configured, open alerts automatically increase the risk score.
 
-Configure thresholds in `.deployguard.yml`:
+Configure thresholds in `.trailhead.yml`:
 
 ```yaml
 security:
@@ -134,13 +134,13 @@ security:
 Enable built-in DORA-5 metrics to track deployment health:
 
 ```yaml
-- uses: dschirmer-shiftkey/deployguard@v3
+- uses: KomatikAI/trailhead@v3
   with:
     dora-metrics: "true"
     dora-environment: "production"
 ```
 
-DeployGuard computes all five DORA metrics from your GitHub data:
+Trailhead computes all five DORA metrics from your GitHub data:
 
 - **Deployment Frequency** — successful workflow runs or deployments per week
 - **Change Failure Rate** — ratio of reverts/hotfixes to total merged PRs
@@ -154,7 +154,7 @@ Results appear as shield badges in the Job Summary and are available as action o
 
 ## Per-Repo Configuration
 
-Create `.deployguard.yml` in your repo root:
+Create `.trailhead.yml` in your repo root:
 
 ```yaml
 sensitivity:
@@ -211,7 +211,7 @@ ignore:
 
 ## GitHub App
 
-DeployGuard also ships as a GitHub App for [deployment protection rules](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules). When installed, it automatically gates deployments to protected environments based on real-time risk scoring and health checks.
+Trailhead also ships as a GitHub App for [deployment protection rules](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules). When installed, it automatically gates deployments to protected environments based on real-time risk scoring and health checks.
 
 See [`app/README.md`](app/README.md) for setup and configuration details.
 
@@ -222,7 +222,7 @@ See [`app/README.md`](app/README.md) for setup and configuration details.
 Export every gate evaluation as an OTel span. Point `otel-endpoint` at any OTLP-compatible collector:
 
 ```yaml
-- uses: dschirmer-shiftkey/deployguard@v3
+- uses: KomatikAI/trailhead@v3
   with:
     otel-endpoint: "https://otel-collector.example.com:4318/v1/traces"
     otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"
@@ -237,7 +237,7 @@ Pre-built dashboards for Grafana and Datadog are available in [`examples/observa
 A production-grade setup with all v3 features:
 
 ```yaml
-name: DeployGuard
+name: Trailhead
 on:
   pull_request:
     branches: [main, staging]
@@ -249,14 +249,14 @@ permissions:
   security-events: read
 
 concurrency:
-  group: deployguard-${{ github.ref }}
+  group: trailhead-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: dschirmer-shiftkey/deployguard@v3
+      - uses: KomatikAI/trailhead@v3
         id: gate
         with:
           risk-threshold: "75"
@@ -272,7 +272,7 @@ jobs:
           security-gate: "true"
           otel-endpoint: ${{ secrets.OTEL_ENDPOINT }}
           otel-headers: "Authorization=Bearer ${{ secrets.OTEL_TOKEN }}"
-          evaluation-store-url: "https://myapp.com/api/deployguard/store"
+          evaluation-store-url: "https://myapp.com/api/trailhead/store"
           evaluation-store-secret: ${{ secrets.INTERNAL_API_SECRET }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -293,10 +293,10 @@ jobs:
 ## CLI
 
 ```bash
-npx deployguard init
+npx trailhead init
 ```
 
-Interactive wizard that generates `.deployguard.yml` and the workflow YAML with all v3 features. No installation required.
+Interactive wizard that generates `.trailhead.yml` and the workflow YAML with all v3 features. No installation required.
 
 ---
 

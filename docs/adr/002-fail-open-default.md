@@ -2,15 +2,15 @@
 
 **Status:** Accepted
 **Date:** 2026-03-20
-**Author:** DeployGuard team
+**Author:** Trailhead team
 
 ## Context
 
-DeployGuard runs as a CI check on every pull request. If DeployGuard itself errors (API timeout, misconfiguration, transient failure), we need to decide whether to block the deployment (fail-closed) or allow it with a warning (fail-open).
+Trailhead runs as a CI check on every pull request. If Trailhead itself errors (API timeout, misconfiguration, transient failure), we need to decide whether to block the deployment (fail-closed) or allow it with a warning (fail-open).
 
 ## Decision
 
-Default to **fail-open**. When DeployGuard encounters an internal error during evaluation, the deployment proceeds with a visible warning. Users who require stricter guarantees can set `fail-mode: closed`.
+Default to **fail-open**. When Trailhead encounters an internal error during evaluation, the deployment proceeds with a visible warning. Users who require stricter guarantees can set `fail-mode: closed`.
 
 ## Rationale
 
@@ -20,6 +20,6 @@ Default to **fail-open**. When DeployGuard encounters an internal error during e
 
 ## Consequences
 
-- **Positive:** Developers are never blocked by DeployGuard bugs. Adoption friction is minimal.
-- **Negative:** A misconfigured DeployGuard silently fails-open, potentially missing real risks.
+- **Positive:** Developers are never blocked by Trailhead bugs. Adoption friction is minimal.
+- **Negative:** A misconfigured Trailhead silently fails-open, potentially missing real risks.
 - **Mitigated by:** Visible warning annotations on the PR when fail-open triggers, plus evaluation store logging for audit trails.

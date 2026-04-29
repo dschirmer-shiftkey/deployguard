@@ -47,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            --title "DeployGuard ${GITHUB_REF_NAME}" \
+            --title "Trailhead ${GITHUB_REF_NAME}" \
             --generate-notes
 
   publish-cli:

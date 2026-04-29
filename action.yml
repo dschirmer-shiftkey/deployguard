@@ -1,4 +1,4 @@
-name: "DeployGuard"
+name: "Trailhead"
 description: "Deployment gate for GitHub PRs — scores code risk, checks production health, integrates security signals, and blocks dangerous releases."
 author: "Komatik"
 
@@ -24,15 +24,15 @@ inputs:
     required: false
     default: ""
   fail-mode:
-    description: "What to do when DeployGuard itself errors: 'open' allows the deploy, 'closed' blocks it."
+    description: "What to do when Trailhead itself errors: 'open' allows the deploy, 'closed' blocks it."
     required: false
     default: "open"
   self-heal:
-    description: "Attempt to auto-repair failing tests before blocking (requires DEPLOYGUARD_TEST_FAILURES env)."
+    description: "Attempt to auto-repair failing tests before blocking (requires TRAILHEAD_TEST_FAILURES env)."
     required: false
     default: "false"
   add-risk-labels:
-    description: "Add risk-level labels (deployguard:low-risk, etc.) to the PR. Requires pull-requests: write."
+    description: "Add risk-level labels (trailhead:low-risk, etc.) to the PR. Requires pull-requests: write."
     required: false
     default: "true"
   reviewers-on-risk:
@@ -64,7 +64,7 @@ inputs:
     required: false
     default: ""
   environment:
-    description: "Target deployment environment. Used for per-environment threshold overrides from .deployguard.yml."
+    description: "Target deployment environment. Used for per-environment threshold overrides from .trailhead.yml."
     required: false
     default: ""
   security-gate:
@@ -84,7 +84,7 @@ inputs:
     required: false
     default: ""
   api-key:
-    description: "API key for remote enrichment via a DeployGuard cloud endpoint. Omit for local-only mode."
+    description: "API key for remote enrichment via a Trailhead cloud endpoint. Omit for local-only mode."
     required: false
     default: ""
 

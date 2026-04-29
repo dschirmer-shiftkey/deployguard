@@ -205,7 +205,7 @@ export async function fetchRecentDeployOutcomes(
 
   try {
     const url =
-      `${supabaseUrl}/rest/v1/deployguard_evaluations` +
+      `${supabaseUrl}/rest/v1/trailhead_evaluations` +
       `?select=deploy_outcome,deployed_at` +
       `&deploy_outcome=neq.null` +
       `&order=deployed_at.desc` +

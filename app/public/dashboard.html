@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DeployGuard Dashboard</title>
+    <title>Trailhead Dashboard</title>
     <style>
       *,
       *::before,
@@ -225,7 +225,7 @@
     </style>
   </head>
   <body>
-    <h1>DeployGuard Dashboard</h1>
+    <h1>Trailhead Dashboard</h1>
     <p class="subtitle">Evaluation history and deployment health overview</p>
 
     <div class="config-bar">
@@ -320,7 +320,7 @@
 
         const since = new Date(Date.now() - windowDays * 86400000).toISOString();
         const endpoint =
-          `${url}/rest/v1/deployguard_evaluations` +
+          `${url}/rest/v1/trailhead_evaluations` +
           `?select=*` +
           `&created_at=gte.${since}` +
           `&order=created_at.desc` +

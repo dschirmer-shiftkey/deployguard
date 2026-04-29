@@ -156,7 +156,7 @@ export async function evaluateGate(config, commitSha, prNumber) {
 // ---------------------------------------------------------------------------
 export function formatGateReport(evaluation) {
     const lines = [
-        `## DeployGuard Evaluation`,
+        `## Trailhead Evaluation`,
         ``,
         `| Metric | Score |`,
         `|--------|-------|`,

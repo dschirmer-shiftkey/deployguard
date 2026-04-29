@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
  */
 
 // ---------------------------------------------------------------------------
-// generateDeployguardYml — extracted from cli/src/index.ts
+// generateTrailheadYml — extracted from cli/src/index.ts
 // ---------------------------------------------------------------------------
 
 interface DeployguardYmlOptions {
@@ -25,10 +25,10 @@ interface DeployguardYmlOptions {
   canaryType: string;
 }
 
-function generateDeployguardYml(options: DeployguardYmlOptions): string {
+function generateTrailheadYml(options: DeployguardYmlOptions): string {
   const lines: string[] = [
-    "# DeployGuard v3 configuration",
-    "# https://github.com/dschirmer-shiftkey/deployguard",
+    "# Trailhead v3 configuration",
+    "# https://github.com/KomatikAI/trailhead",
     "",
   ];
 
@@ -115,7 +115,7 @@ interface WorkflowYmlOptions {
 
 function generateWorkflowYml(options: WorkflowYmlOptions): string {
   const lines: string[] = [
-    "name: DeployGuard",
+    "name: Trailhead",
     "",
     "on:",
     "  pull_request:",
@@ -128,12 +128,12 @@ function generateWorkflowYml(options: WorkflowYmlOptions): string {
     "  security-events: read",
     "",
     "jobs:",
-    "  deployguard:",
+    "  trailhead:",
     "    runs-on: ubuntu-latest",
     "    steps:",
     "      - uses: actions/checkout@v4",
     "",
-    "      - uses: dschirmer-shiftkey/deployguard@v3",
+    "      - uses: KomatikAI/trailhead@v3",
     "        id: gate",
     "        with:",
     `          risk-threshold: "${options.riskThreshold}"`,
@@ -210,7 +210,7 @@ function generateWorkflowYml(options: WorkflowYmlOptions): string {
 // TESTS
 // ===========================================================================
 
-describe("CLI: generateDeployguardYml", () => {
+describe("CLI: generateTrailheadYml", () => {
   const defaults: DeployguardYmlOptions = {
     highSensitivity: [],
     mediumSensitivity: [],
@@ -225,7 +225,7 @@ describe("CLI: generateDeployguardYml", () => {
   };
 
   it("generates minimal config with just thresholds", () => {
-    const yml = generateDeployguardYml(defaults);
+    const yml = generateTrailheadYml(defaults);
     expect(yml).toContain("thresholds:");
     expect(yml).toContain("risk: 70");
     expect(yml).toContain("warn: 55");
@@ -235,7 +235,7 @@ describe("CLI: generateDeployguardYml", () => {
   });
 
   it("includes sensitivity patterns when provided", () => {
-    const yml = generateDeployguardYml({
+    const yml = generateTrailheadYml({
       ...defaults,
       highSensitivity: ["src/auth/**", "src/billing/**"],
       mediumSensitivity: ["src/api/**"],
@@ -247,7 +247,7 @@ describe("CLI: generateDeployguardYml", () => {
   });
 
   it("includes environment overrides", () => {
-    const yml = generateDeployguardYml({
+    const yml = generateTrailheadYml({
       ...defaults,
       environments: [
         { name: "production", risk: 50, warn: 35 },
@@ -262,7 +262,7 @@ describe("CLI: generateDeployguardYml", () => {
   });
 
   it("includes service boundaries", () => {
-    const yml = generateDeployguardYml({
+    const yml = generateTrailheadYml({
       ...defaults,
       services: [
         { name: "api", paths: ["src/api/**", "src/models/**"], env: "production" },
@@ -275,20 +275,20 @@ describe("CLI: generateDeployguardYml", () => {
   });
 
   it("includes security gate config", () => {
-    const yml = generateDeployguardYml({ ...defaults, securityGate: true });
+    const yml = generateTrailheadYml({ ...defaults, securityGate: true });
     expect(yml).toContain("security:");
     expect(yml).toContain("severity_threshold: warning");
     expect(yml).toContain("block_on_critical: true");
   });
 
   it("includes canary config", () => {
-    const yml = generateDeployguardYml({ ...defaults, canaryType: "vercel" });
+    const yml = generateTrailheadYml({ ...defaults, canaryType: "vercel" });
     expect(yml).toContain("canary:");
     expect(yml).toContain("webhook_type: vercel");
   });
 
   it("includes freeze windows", () => {
-    const yml = generateDeployguardYml({
+    const yml = generateTrailheadYml({
       ...defaults,
       freezeDays: ["friday", "saturday"],
       freezeAfterHour: 15,
@@ -300,12 +300,12 @@ describe("CLI: generateDeployguardYml", () => {
   });
 
   it("starts with a header comment", () => {
-    const yml = generateDeployguardYml(defaults);
-    expect(yml.startsWith("# DeployGuard v3 configuration")).toBe(true);
+    const yml = generateTrailheadYml(defaults);
+    expect(yml.startsWith("# Trailhead v3 configuration")).toBe(true);
   });
 
   it("ends with a trailing newline", () => {
-    const yml = generateDeployguardYml(defaults);
+    const yml = generateTrailheadYml(defaults);
     expect(yml.endsWith("\n")).toBe(true);
   });
 });
@@ -326,12 +326,12 @@ describe("CLI: generateWorkflowYml", () => {
 
   it("generates valid workflow yaml structure", () => {
     const yml = generateWorkflowYml(defaults);
-    expect(yml).toContain("name: DeployGuard");
+    expect(yml).toContain("name: Trailhead");
     expect(yml).toContain("on:");
     expect(yml).toContain("pull_request:");
     expect(yml).toContain("permissions:");
     expect(yml).toContain("jobs:");
-    expect(yml).toContain("dschirmer-shiftkey/deployguard@v3");
+    expect(yml).toContain("KomatikAI/trailhead@v3");
   });
 
   it("includes risk threshold", () => {

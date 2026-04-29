@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { DeployGuardConfig } from "../types.js";
+import type { TrailheadConfig } from "../types.js";
 
 const mockListFiles = vi.fn();
 const mockListCommits = vi.fn();
@@ -38,7 +38,7 @@ vi.mock("@actions/github", () => ({
   }),
 }));
 
-function makeConfig(overrides: Partial<DeployGuardConfig> = {}): DeployGuardConfig {
+function makeConfig(overrides: Partial<TrailheadConfig> = {}): TrailheadConfig {
   return {
     apiKey: "",
     apiUrl: "",

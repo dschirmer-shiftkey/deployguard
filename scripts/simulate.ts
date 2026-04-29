@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Local simulation of the DeployGuard gate evaluation.
+ * Local simulation of the Trailhead gate evaluation.
  *
  * Usage:
  *   npx tsx scripts/simulate.ts
@@ -12,6 +12,10 @@
  *   GITHUB_TOKEN       — enables PR file fetching
  *   PR_NUMBER          — pull request number to evaluate
  */
+
+function readEnv(primary: string, legacy?: string): string | undefined {
+  return process.env[primary] ?? (legacy ? process.env[legacy] : undefined);
+}
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -29,7 +33,7 @@ async function main() {
 
   const targetRepo =
     flags["repo"] ??
-    process.env.DEPLOYGUARD_TARGET_REPO ??
+    readEnv("TRAILHEAD_TARGET_REPO", "DEPLOYGUARD_TARGET_REPO") ??
     process.env.GITHUB_REPOSITORY ??
     "owner/repo";
 
@@ -46,11 +50,11 @@ async function main() {
 
   const { evaluateGate, formatGateReport } = await import("../src/gate.js");
 
-  type DeployGuardConfig = import("../src/types.js").DeployGuardConfig;
+  type TrailheadConfig = import("../src/types.js").TrailheadConfig;
 
-  const config: DeployGuardConfig = {
+  const config: TrailheadConfig = {
     apiKey: "",
-    apiUrl: process.env.DEPLOYGUARD_API_URL || "",
+    apiUrl: readEnv("TRAILHEAD_API_URL", "DEPLOYGUARD_API_URL") || "",
     githubToken: process.env.GITHUB_TOKEN,
     healthCheckUrls: (flags["health-url"] || "")
       .split(",")
@@ -72,7 +76,7 @@ async function main() {
       ? parseInt(process.env.PR_NUMBER, 10)
       : undefined;
 
-  console.log("--- DeployGuard Local Simulation ---");
+  console.log("--- Trailhead Local Simulation ---");
   console.log(`  repo:      ${owner}/${repo}`);
   console.log(`  commit:    ${commitSha.substring(0, 7)}`);
   console.log(`  PR:        ${prNumber ?? "(none)"}`);

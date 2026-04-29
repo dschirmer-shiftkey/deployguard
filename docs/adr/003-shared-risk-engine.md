@@ -2,11 +2,11 @@
 
 **Status:** Accepted
 **Date:** 2026-03-25
-**Author:** DeployGuard team
+**Author:** Trailhead team
 
 ## Context
 
-DeployGuard ships three interfaces: a GitHub Action, a GitHub App (deployment protection rules), and an MCP server. All three need to compute risk scores. We must decide whether each surface implements its own scoring or shares a single implementation.
+Trailhead ships three interfaces: a GitHub Action, a GitHub App (deployment protection rules), and an MCP server. All three need to compute risk scores. We must decide whether each surface implements its own scoring or shares a single implementation.
 
 ## Decision
 

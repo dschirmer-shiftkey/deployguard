@@ -8,7 +8,7 @@ function logJson(level: string, msg: string, extra?: Record<string, unknown>): v
   const entry = {
     level,
     msg,
-    service: "deployguard-app",
+    service: "trailhead-app",
     ts: new Date().toISOString(),
     ...extra,
   };
@@ -17,7 +17,7 @@ function logJson(level: string, msg: string, extra?: Record<string, unknown>): v
 
 const app = new Hono();
 
-app.get("/health", (c) => c.json({ status: "ok", service: "deployguard-app" }));
+app.get("/health", (c) => c.json({ status: "ok", service: "trailhead-app" }));
 
 app.use("/dashboard/*", serveStatic({ root: "./public" }));
 app.get("/dashboard", (c) => c.redirect("/dashboard/dashboard.html"));
@@ -103,9 +103,9 @@ app.post("/webhook/deploy-outcome", async (c) => {
   });
 });
 
-app.get("/.well-known/deployguard.json", (c) =>
+app.get("/.well-known/trailhead.json", (c) =>
   c.json({
-    name: "DeployGuard",
+    name: "Trailhead",
     version: "3.0.2",
     description:
       "Deployment gate — scores code risk, checks production health, blocks dangerous releases.",
@@ -117,7 +117,7 @@ app.get("/.well-known/deployguard.json", (c) =>
       "security-alerts",
       "canary-hooks",
     ],
-    homepage: "https://github.com/dschirmer-shiftkey/deployguard",
+    homepage: "https://github.com/KomatikAI/trailhead",
   }),
 );
 

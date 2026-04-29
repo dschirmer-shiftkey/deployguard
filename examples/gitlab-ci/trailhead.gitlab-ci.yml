@@ -1,29 +1,29 @@
-# DeployGuard for GitLab CI
+# Trailhead for GitLab CI
 #
-# This pipeline replicates DeployGuard's risk scoring for GitLab merge requests.
-# Since DeployGuard is a GitHub Action, this template uses the MCP server's
+# This pipeline replicates Trailhead's risk scoring for GitLab merge requests.
+# Since Trailhead is a GitHub Action, this template uses the MCP server's
 # compute-risk-score tool via a Node.js script to score changed files.
 #
 # Prerequisites:
-# - Clone the deployguard repo and build the MCP server, or use a published image.
-# - Set CI/CD variables: DEPLOYGUARD_RISK_THRESHOLD (default: 70)
+# - Clone the trailhead repo and build the MCP server, or use a published image.
+# - Set CI/CD variables: TRAILHEAD_RISK_THRESHOLD (default: 70)
 #
 # Copy to your repo's .gitlab-ci.yml or include it.
 
 stages:
   - gate
 
-deployguard:
+trailhead:
   stage: gate
   image: node:20-slim
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
-    RISK_THRESHOLD: "${DEPLOYGUARD_RISK_THRESHOLD:-70}"
-    WARN_THRESHOLD: "${DEPLOYGUARD_WARN_THRESHOLD:-55}"
+    RISK_THRESHOLD: "${TRAILHEAD_RISK_THRESHOLD:-70}"
+    WARN_THRESHOLD: "${TRAILHEAD_WARN_THRESHOLD:-55}"
   script:
     - |
-      echo "DeployGuard — scoring merge request !${CI_MERGE_REQUEST_IID}"
+      echo "Trailhead — scoring merge request !${CI_MERGE_REQUEST_IID}"
 
       # Collect changed files and line counts from the MR diff
       FILES_JSON=$(git diff --numstat "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD" \
@@ -71,7 +71,7 @@ deployguard:
         const decision = score > threshold ? 'block' : score > warnThreshold ? 'warn' : 'allow';
 
         console.log('');
-        console.log('DeployGuard Risk Report');
+        console.log('Trailhead Risk Report');
         console.log('======================');
         console.log('Score:    ' + score + '/100');
         console.log('Decision: ' + decision.toUpperCase());

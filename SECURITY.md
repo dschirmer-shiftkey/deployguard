@@ -10,7 +10,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in DeployGuard, please report it responsibly.
+If you discover a security vulnerability in Trailhead, please report it responsibly.
 
 **Do not open a public issue.**
 
@@ -31,7 +31,7 @@ The following are in scope:
 - The GitHub App webhook handler (`app/`)
 - The CLI (`cli/`)
 - Risk scoring logic (`src/risk-engine.ts`)
-- Configuration parsing (`src/config.ts`, `.deployguard.yml`)
+- Configuration parsing (`src/config.ts`, `.trailhead.yml`)
 
 The following are out of scope:
 
@@ -41,11 +41,11 @@ The following are out of scope:
 
 ## Security Design
 
-DeployGuard is designed with these security principles:
+Trailhead is designed with these security principles:
 
-- **Fail-open by default** — if DeployGuard itself errors, deployments proceed (configurable via `fail-mode: closed`)
+- **Fail-open by default** — if Trailhead itself errors, deployments proceed (configurable via `fail-mode: closed`)
 - **No secrets required** — works with the automatic `GITHUB_TOKEN`, no API keys needed for basic operation
 - **Read-only by default** — only reads PR data and code scanning alerts; label/comment writes require explicit `pull-requests: write`
-- **No code execution** — DeployGuard analyzes metadata (file names, line counts, alert counts), never executes or evaluates PR code
+- **No code execution** — Trailhead analyzes metadata (file names, line counts, alert counts), never executes or evaluates PR code
 - **HMAC verification** — webhook endpoints verify signatures when secrets are configured
 - **Minimal permissions** — the action requests only `contents: read`, `checks: write`, `pull-requests: write`, and `security-events: read`

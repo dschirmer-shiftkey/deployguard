@@ -22,7 +22,7 @@ export async function sendWebhook(
   const emoji = decisionEmoji[evaluation.gateDecision] ?? "";
 
   const slackText =
-    `${emoji} DeployGuard *${evaluation.gateDecision.toUpperCase()}* — ` +
+    `${emoji} Trailhead *${evaluation.gateDecision.toUpperCase()}* — ` +
     `risk ${evaluation.riskScore}/100` +
     (prUrl
       ? ` | <${prUrl}|PR #${evaluation.prNumber}>`
@@ -111,7 +111,7 @@ async function storeViaSupabase(evaluation: GateEvaluation): Promise<boolean> {
     return false;
   }
 
-  const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/deployguard_evaluations`;
+  const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/trailhead_evaluations`;
 
   const row = {
     id: evaluation.id,

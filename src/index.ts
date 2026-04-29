@@ -71,7 +71,7 @@ export type {
   HealthCheckResult,
   RiskFactor,
   RepoConfig,
-  DeployGuardConfig,
+  TrailheadConfig,
   TestRepairResult,
   EnvironmentConfig,
   ServiceMapping,

@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-03-28
-**Author:** DeployGuard team
+**Author:** Trailhead team
 
 ## Context
 
@@ -20,7 +20,7 @@ Apply **file sensitivity multipliers** to line change counts before computing th
 | Config/docs (`.md`, `.json`)      | 0.5x       | Low impact                  |
 | Test files (`.test.ts`)           | 0.3x       | Tests reduce risk           |
 
-Users can override these via the `sensitivity` block in `.deployguard.yml`.
+Users can override these via the `sensitivity` block in `.trailhead.yml`.
 
 ## Rationale
 

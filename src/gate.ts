@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { GateApiResponse as GateApiResponseSchema } from "./types.js";
 import type {
-  DeployGuardConfig,
+  TrailheadConfig,
   GateApiResponse,
   GateDecision,
   GateEvaluation,
@@ -547,7 +547,7 @@ function aggregateHealthScore(checks: HealthCheckResult[]): number {
 const API_TIMEOUT_MS = 15_000;
 
 async function callGateApi(
-  config: DeployGuardConfig,
+  config: TrailheadConfig,
   localEvaluation: GateEvaluation,
 ): Promise<GateApiResponse | null> {
   try {
@@ -592,7 +592,7 @@ async function callGateApi(
 // ---------------------------------------------------------------------------
 
 export async function evaluateGate(
-  config: DeployGuardConfig,
+  config: TrailheadConfig,
   commitSha: string,
   prNumber?: number,
 ): Promise<GateEvaluation> {
@@ -743,7 +743,7 @@ export async function postPrComment(
       issue_number: prNumber,
       per_page: 100,
     });
-    const MARKER = "<!-- deployguard-gate-report -->";
+    const MARKER = "<!-- trailhead-gate-report -->";
     const body = `${MARKER}\n${report}`;
 
     const existing = comments.find((c) => c.body?.includes(MARKER));
@@ -790,12 +790,12 @@ export async function createCheckRun(
     await octokit.rest.checks.create({
       owner,
       repo,
-      name: "DeployGuard",
+      name: "Trailhead",
       head_sha: evaluation.commitSha,
       status: "completed",
       conclusion: CONCLUSION_MAP[evaluation.gateDecision],
       output: {
-        title: `DeployGuard: ${evaluation.gateDecision.toUpperCase()}`,
+        title: `Trailhead: ${evaluation.gateDecision.toUpperCase()}`,
         summary: report,
       },
     });
@@ -809,28 +809,28 @@ export async function createCheckRun(
 // ---------------------------------------------------------------------------
 
 const RISK_LABELS: Record<string, { color: string; description: string }> = {
-  "deployguard:low-risk": {
+  "trailhead:low-risk": {
     color: "0e8a16",
-    description: "DeployGuard: low risk score",
+    description: "Trailhead: low risk score",
   },
-  "deployguard:medium-risk": {
+  "trailhead:medium-risk": {
     color: "fbca04",
-    description: "DeployGuard: medium risk score",
+    description: "Trailhead: medium risk score",
   },
-  "deployguard:high-risk": {
+  "trailhead:high-risk": {
     color: "d93f0b",
-    description: "DeployGuard: high risk score",
+    description: "Trailhead: high risk score",
   },
 };
 
 function riskLabelForDecision(decision: GateDecision): string {
   switch (decision) {
     case "allow":
-      return "deployguard:low-risk";
+      return "trailhead:low-risk";
     case "warn":
-      return "deployguard:medium-risk";
+      return "trailhead:medium-risk";
     case "block":
-      return "deployguard:high-risk";
+      return "trailhead:high-risk";
     default: {
       const _exhaustive: never = decision;
       throw new Error(`Unknown decision: ${_exhaustive}`);
@@ -871,11 +871,10 @@ export async function managePrLabels(
     });
 
     for (const label of currentLabels) {
-      if (
-        label.name.startsWith("deployguard:") &&
-        label.name.endsWith("-risk") &&
-        label.name !== targetLabel
-      ) {
+      const isRiskLabel =
+        (label.name.startsWith("trailhead:") || label.name.startsWith("deployguard:")) &&
+        label.name.endsWith("-risk");
+      if (isRiskLabel && label.name !== targetLabel) {
         await octokit.rest.issues.removeLabel({
           owner,
           repo,
@@ -1142,7 +1141,7 @@ export function formatGateReport(
   const envLabel = evaluation.environment ? ` (${evaluation.environment})` : "";
 
   const lines: string[] = [
-    `## ${icon} DeployGuard — ${evaluation.gateDecision.toUpperCase()}${envLabel}`,
+    `## ${icon} Trailhead — ${evaluation.gateDecision.toUpperCase()}${envLabel}`,
     ``,
     riskBadge(evaluation.riskScore, threshold) +
       " " +

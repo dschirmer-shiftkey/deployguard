@@ -5,13 +5,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Have an idea for DeployGuard? We'd love to hear it.
+        Have an idea for Trailhead? We'd love to hear it.
 
   - type: dropdown
     id: component
     attributes:
       label: Component
-      description: Which part of DeployGuard would this affect?
+      description: Which part of Trailhead would this affect?
       options:
         - GitHub Action
         - GitHub App

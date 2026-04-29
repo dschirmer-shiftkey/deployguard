@@ -88,10 +88,13 @@ export async function loadRepoConfig(token?: string): Promise<RepoConfigType | n
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
 
+    const configPath = await findConfigPath(octokit, owner, repo);
+    if (!configPath) return null;
+
     const { data } = await octokit.rest.repos.getContent({
       owner,
       repo,
-      path: ".deployguard.yml",
+      path: configPath,
     });
 
     if (Array.isArray(data) || data.type !== "file" || !data.content) {
@@ -103,21 +106,38 @@ export async function loadRepoConfig(token?: string): Promise<RepoConfigType | n
     const parsed = RepoConfig.safeParse(raw);
 
     if (!parsed.success) {
-      core.warning(
-        `.deployguard.yml parse error: ${parsed.error.message} — using defaults`,
-      );
+      core.warning(`${configPath} parse error: ${parsed.error.message} — using defaults`);
       return null;
     }
 
-    core.debug(`Loaded .deployguard.yml: ${JSON.stringify(parsed.data)}`);
+    core.debug(`Loaded ${configPath}: ${JSON.stringify(parsed.data)}`);
     return parsed.data;
   } catch (error) {
     const msg = String(error);
     if (!msg.includes("404") && !msg.includes("Not Found")) {
-      core.debug(`.deployguard.yml load failed: ${msg}`);
+      core.debug(`Trailhead config load failed: ${msg}`);
     }
     return null;
   }
+}
+
+async function findConfigPath(
+  octokit: ReturnType<typeof github.getOctokit>,
+  owner: string,
+  repo: string,
+): Promise<string | null> {
+  for (const path of [".trailhead.yml", ".deployguard.yml"]) {
+    try {
+      await octokit.rest.repos.getContent({ owner, repo, path });
+      return path;
+    } catch (error) {
+      const msg = String(error);
+      if (!msg.includes("404") && !msg.includes("Not Found")) {
+        throw error;
+      }
+    }
+  }
+  return null;
 }
 
 export { matchesGlobs } from "./risk-engine.js";

@@ -1077,12 +1077,12 @@ describe("createCheckRun", () => {
       expect.objectContaining({
         owner: "test-owner",
         repo: "test-repo",
-        name: "DeployGuard",
+        name: "Trailhead",
         head_sha: "abc1234567890",
         status: "completed",
         conclusion: "success",
         output: expect.objectContaining({
-          title: "DeployGuard: ALLOW",
+          title: "Trailhead: ALLOW",
           summary: "## Report",
         }),
       }),
@@ -1125,36 +1125,36 @@ describe("managePrLabels", () => {
 
   it("creates labels, removes old ones, and adds the correct label for allow", async () => {
     mockListLabelsOnIssue.mockResolvedValue({
-      data: [{ name: "deployguard:high-risk" }],
+      data: [{ name: "trailhead:high-risk" }],
     });
     await managePrLabels(42, "allow", "ghp_test");
 
     expect(mockCreateLabel).toHaveBeenCalledTimes(3);
     expect(mockRemoveLabel).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "deployguard:high-risk" }),
+      expect.objectContaining({ name: "trailhead:high-risk" }),
     );
     expect(mockAddLabels).toHaveBeenCalledWith(
-      expect.objectContaining({ labels: ["deployguard:low-risk"] }),
+      expect.objectContaining({ labels: ["trailhead:low-risk"] }),
     );
   });
 
   it("adds medium-risk label for warn decision", async () => {
     await managePrLabels(42, "warn", "ghp_test");
     expect(mockAddLabels).toHaveBeenCalledWith(
-      expect.objectContaining({ labels: ["deployguard:medium-risk"] }),
+      expect.objectContaining({ labels: ["trailhead:medium-risk"] }),
     );
   });
 
   it("adds high-risk label for block decision", async () => {
     await managePrLabels(42, "block", "ghp_test");
     expect(mockAddLabels).toHaveBeenCalledWith(
-      expect.objectContaining({ labels: ["deployguard:high-risk"] }),
+      expect.objectContaining({ labels: ["trailhead:high-risk"] }),
     );
   });
 
   it("skips adding label if already applied", async () => {
     mockListLabelsOnIssue.mockResolvedValue({
-      data: [{ name: "deployguard:low-risk" }],
+      data: [{ name: "trailhead:low-risk" }],
     });
     await managePrLabels(42, "allow", "ghp_test");
     expect(mockAddLabels).not.toHaveBeenCalled();
@@ -1233,7 +1233,7 @@ describe("postPrComment", () => {
         owner: "test-owner",
         repo: "test-repo",
         issue_number: 42,
-        body: expect.stringContaining("<!-- deployguard-gate-report -->"),
+        body: expect.stringContaining("<!-- trailhead-gate-report -->"),
       }),
     );
     expect(mockUpdateComment).not.toHaveBeenCalled();
@@ -1241,7 +1241,7 @@ describe("postPrComment", () => {
 
   it("updates an existing comment when marker is found", async () => {
     mockListComments.mockResolvedValue({
-      data: [{ id: 999, body: "<!-- deployguard-gate-report -->\nold report" }],
+      data: [{ id: 999, body: "<!-- trailhead-gate-report -->\nold report" }],
     });
     await postPrComment("## Updated Report", 42, "ghp_test");
 

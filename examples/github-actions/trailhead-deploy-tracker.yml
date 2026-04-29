@@ -1,15 +1,15 @@
-# Records a successful production deploy against the latest DeployGuard evaluation
+# Records a successful production deploy against the latest Trailhead evaluation
 # for the same commit, so trend dashboards can compute correlation (false positive
 # rate, warned → incident, etc.).
 #
 # Prerequisites:
-# - Supabase (or compatible) table with deployguard_evaluations including optional
+# - Supabase (or compatible) table with trailhead_evaluations including optional
 #   Optional columns: deploy_outcome, deployed_at, incident_url (add via your own migration).
 # - GitHub secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 #
 # Copy to .github/workflows/ and set `branches` to your production branch.
 
-name: DeployGuard deploy correlation
+name: Trailhead deploy correlation
 
 on:
   push:
@@ -31,7 +31,7 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          REST="${SUPABASE_URL%/}/rest/v1/deployguard_evaluations"
+          REST="${SUPABASE_URL%/}/rest/v1/trailhead_evaluations"
           DEPLOYED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
           MATCH="$(curl -sS -G "${REST}" \
@@ -45,7 +45,7 @@ jobs:
 
           EVAL_ID="$(echo "${MATCH}" | jq -r '.[0].id // empty')"
           if [ -z "${EVAL_ID}" ]; then
-            echo "No deployguard_evaluations row for commit ${COMMIT_SHA} — nothing to update."
+            echo "No trailhead_evaluations row for commit ${COMMIT_SHA} — nothing to update."
             exit 0
           fi
 

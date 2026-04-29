@@ -92,11 +92,11 @@ async function rollbackViaGitHubDeployment(
       environment,
       auto_merge: false,
       required_contexts: [],
-      description: `DeployGuard rollback to ${targetDeployment.sha.substring(0, 7)}`,
+      description: `Trailhead rollback to ${targetDeployment.sha.substring(0, 7)}`,
       payload: {
         rollback: true,
         rollbackFromSha: github.context.sha,
-        triggeredBy: "deployguard",
+        triggeredBy: "trailhead",
       } as unknown as string,
     });
 
@@ -106,7 +106,7 @@ async function rollbackViaGitHubDeployment(
         repo,
         deployment_id: newDeployment.id,
         state: "queued",
-        description: "DeployGuard initiated rollback",
+        description: "Trailhead initiated rollback",
       });
 
       return {
@@ -231,12 +231,18 @@ async function rollbackViaVercel(): Promise<RollbackResult> {
 // Workflow dispatch rollback (triggers a user-defined rollback workflow)
 // ---------------------------------------------------------------------------
 
+function readEnv(primary: string, legacy?: string): string | undefined {
+  return process.env[primary] ?? (legacy ? process.env[legacy] : undefined);
+}
+
 async function rollbackViaWorkflowDispatch(
   token: string,
   targetSha: string,
   environment: string,
 ): Promise<RollbackResult> {
-  const workflowFile = process.env.DEPLOYGUARD_ROLLBACK_WORKFLOW ?? "rollback.yml";
+  const workflowFile =
+    readEnv("TRAILHEAD_ROLLBACK_WORKFLOW", "DEPLOYGUARD_ROLLBACK_WORKFLOW") ??
+    "rollback.yml";
 
   try {
     const octokit = github.getOctokit(token);
@@ -250,8 +256,8 @@ async function rollbackViaWorkflowDispatch(
       inputs: {
         target_sha: targetSha,
         environment,
-        reason: "deployguard-auto-rollback",
-        triggered_by: `deployguard:${github.context.sha.substring(0, 7)}`,
+        reason: "trailhead-auto-rollback",
+        triggered_by: `trailhead:${github.context.sha.substring(0, 7)}`,
       },
     });
 
@@ -279,9 +285,10 @@ async function rollbackViaWorkflowDispatch(
 type RollbackStrategy = "auto" | "github-deployment" | "vercel" | "workflow-dispatch";
 
 function detectStrategy(): RollbackStrategy {
-  const explicit = process.env.DEPLOYGUARD_ROLLBACK_STRATEGY as
-    | RollbackStrategy
-    | undefined;
+  const explicit = readEnv(
+    "TRAILHEAD_ROLLBACK_STRATEGY",
+    "DEPLOYGUARD_ROLLBACK_STRATEGY",
+  ) as RollbackStrategy | undefined;
   if (
     explicit &&
     ["github-deployment", "vercel", "workflow-dispatch"].includes(explicit)
@@ -293,7 +300,7 @@ function detectStrategy(): RollbackStrategy {
     return "vercel";
   }
 
-  if (process.env.DEPLOYGUARD_ROLLBACK_WORKFLOW) {
+  if (readEnv("TRAILHEAD_ROLLBACK_WORKFLOW", "DEPLOYGUARD_ROLLBACK_WORKFLOW")) {
     return "workflow-dispatch";
   }
 
@@ -318,7 +325,7 @@ export async function executeRollback(
   }
 
   core.warning(
-    `DeployGuard: deployment ${outcome.deploymentId} failed in ${outcome.environment} — evaluating rollback`,
+    `Trailhead: deployment ${outcome.deploymentId} failed in ${outcome.environment} — evaluating rollback`,
   );
 
   const strategy = detectStrategy();
@@ -418,7 +425,7 @@ export async function notifyRollback(
       repo,
       issue_number: issueNumber,
       body: [
-        `### ${icon} DeployGuard Auto-Rollback`,
+        `### ${icon} Trailhead Auto-Rollback`,
         ``,
         `**Status:** ${status}`,
         `**Strategy:** ${result.strategy}`,
