@@ -2,17 +2,29 @@
 
 All notable changes to Trailhead will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- **Trailhead canonical naming** — Completed the DeployGuard-to-Trailhead migration across action metadata, docs, examples, package metadata, telemetry attributes, risk labels, and persisted evaluation targets.
+- **Compatibility preserved** — `.deployguard.yml` and shipped `DEPLOYGUARD_*` environment variables remain supported as legacy fallbacks.
+- **Repository branch sync** — `main` is the active/default branch; `dev` and `staging` are kept fast-forwarded to `main`.
+
+### Fixed
+
+- **MCP runtime artifacts** — Committed the generated MCP adapter modules and `mcp/dist/risk-engine.*` so `mcp/dist/server.js` resolves all runtime imports from a fresh checkout.
+- **Local config loading** — Trailhead now prefers `.trailhead.yml` from the checked-out workspace before falling back to the GitHub Contents API, which lets PR self-tests evaluate the policy in the revision being tested.
+- **Generated artifact policy** — Added `.trailhead.yml` ignores for MCP generated copy/artifact paths so repository self-tests score canonical source changes rather than prebuild output.
+
+### Notes
+
+- `origin/experiment/rd-satellite/deployguard-supply-chain-risk` remains unpromoted. Its targeted tests pass, but `app` and `mcp` builds fail until their prebuild scripts copy the new `supply-chain` module alongside `risk-engine.ts`.
+
 ## [3.0.2] - 2026-04-16
 
 ### Fixed
 
 - **Merge-base drift scoring** — GitHub's `pulls.listFiles` API uses a merge-base diff that can include files from unrelated commits when the base branch diverges from the PR branch point. Trailhead now cross-checks the API file list against the PR's actual commits when >30 files are reported. If the API count exceeds 2x the commit-derived count, the commit-level file list is used instead. This prevents inflated `file_count`, `code_churn`, and `sensitive_files` scores that caused false BLOCK decisions. Applied to all three code paths: Action (`gate.ts`), GitHub App (`handler.ts`), and MCP server (`server.ts`). Fail-open: if commit enumeration fails, the API list is kept.
-
-## [3.0.2] - 2026-04-16
-
-### Fixed
-
-- **Merge-base drift scoring** — GitHub's `pulls.listFiles` API uses a merge-base diff that can include files from unrelated commits when the base branch diverges from the PR branch point. DeployGuard now cross-checks the API file list against the PR's actual commits when >30 files are reported. If the API count exceeds 2x the commit-derived count, the commit-level file list is used instead. This prevents inflated `file_count`, `code_churn`, and `sensitive_files` scores that caused false BLOCK decisions. Applied to all three code paths: Action (`gate.ts`), GitHub App (`handler.ts`), and MCP server (`server.ts`). Fail-open: if commit enumeration fails, the API list is kept.
 
 ## [3.0.1] - 2026-04-12
 

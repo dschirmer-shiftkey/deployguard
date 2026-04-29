@@ -207,6 +207,27 @@ ignore:
   - "package-lock.json"
 ```
 
+Trailhead first loads `.trailhead.yml` from the checked-out workspace, then falls back to
+the GitHub Contents API. Existing repositories can keep using legacy `.deployguard.yml`;
+Trailhead will read it when `.trailhead.yml` is not present.
+
+This repository's own `.trailhead.yml` ignores generated MCP copy/artifact paths
+(`mcp/src/adapters/**`, `mcp/dist/adapters/**`, and `mcp/dist/risk-engine.*`) so the gate
+scores canonical source changes rather than prebuild output.
+
+---
+
+## Compatibility
+
+Trailhead is the canonical product name after the DeployGuard-to-Trailhead migration.
+Compatibility remains for shipped surfaces:
+
+- Legacy `.deployguard.yml` configs are still accepted as a fallback.
+- Legacy `DEPLOYGUARD_*` environment variables are still read where those env vars were
+  previously supported.
+- Old `deployguard:*` risk labels are removed when Trailhead applies the new
+  `trailhead:*` risk label.
+
 ---
 
 ## GitHub App

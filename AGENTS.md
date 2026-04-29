@@ -637,15 +637,22 @@ Runtime state lives in PostgreSQL, not in git-committed files.
 
 ### What this project is
 
-DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`**) that scores pull request risk, checks production health, integrates **security signals** (Code Scanning / SARIF), computes **DORA-5** metrics, tracks deployment outcomes via **canary hooks**, exports **OpenTelemetry** spans, and blocks dangerous releases. It also ships a **`deployguard init`** CLI, an optional **GitHub App** (`app/`) for deployment protection rules, and a standalone **MCP server** (`mcp/`) with 12 tools for AI agents.
+Trailhead is the canonical name for the deployment gate formerly known as DeployGuard. It is a GitHub Action (current release **v3.0.x**, floating tag **`v3`**) that scores pull request risk, checks production health, integrates **security signals** (Code Scanning / SARIF), computes **DORA-5** metrics, tracks deployment outcomes via **canary hooks**, exports **OpenTelemetry** spans, and blocks dangerous releases. It also ships a **`trailhead init`** CLI, an optional **GitHub App** (`app/`) for deployment protection rules, and a standalone **MCP server** (`mcp/`, package **`@trailhead/mcp-server` v4.1.0**) with 12 tools for AI agents.
+
+### Current repo state (Apr 29, 2026)
+
+- **Branch model**: this repo uses `main` as the active/default branch. `origin/dev` and `origin/staging` are currently fast-forwarded to `origin/main`; all open PRs target `main`.
+- **Migration status**: PRs #35, #36, and #37 completed the DeployGuard-to-Trailhead cleanup, committed missing MCP runtime artifacts, and added `.trailhead.yml` generated-artifact policy.
+- **Legacy compatibility**: Trailhead remains backwards-compatible with existing `.deployguard.yml` configs and `DEPLOYGUARD_*` environment variables where those surfaces were already shipped.
+- **Known unpromoted branch**: `origin/experiment/rd-satellite/deployguard-supply-chain-risk` has useful supply-chain scoring work, but it is **not merge-ready**. Targeted tests pass, but `app` and `mcp` builds fail because shared `risk-engine.ts` imports `supply-chain.js` without copying that module during prebuild.
 
 ### Hard rules (do not regress)
 
-1. **Fail-open default** — if DeployGuard errors in normal operation, deployments proceed with a warning (unless `fail-mode: closed`). Store/webhook/OTel failures are non-blocking with visible warnings.
+1. **Fail-open default** — if Trailhead errors in normal operation, deployments proceed with a warning (unless `fail-mode: closed`). Store/webhook/OTel failures are non-blocking with visible warnings.
 2. **Minimal GitHub permissions** — read PRs, read code, write checks/comments/labels as documented. No write access to repository code from the gate itself.
 3. **No source code storage** — risk scoring analyzes diffs in-memory. Persisted evaluation payloads contain scores/metadata only.
 4. **Test healer proposes, developer approves** — self-healing changes are suggestions (e.g. PR comments), never force-pushed.
-5. **Shared risk engine** — `src/risk-engine.ts` is the canonical scoring implementation; MCP and app MUST use copies (prebuild copy), not independent implementations.
+5. **Shared risk engine** — `src/risk-engine.ts` is the canonical scoring implementation; MCP and app MUST use prebuild copies, not independent implementations. If `risk-engine.ts` imports a new local module, update both `app` and `mcp` prebuild flows and committed runtime artifacts.
 6. **Merge-base drift protection** — `fetchPrFiles` cross-checks GitHub's `pulls.listFiles` against commit-level files when >30 files reported; falls back to commit-derived list when API count exceeds 2x actual. Applied to Action, App, and MCP server.
 
 ### Dependencies
@@ -662,7 +669,7 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 - **Bundler**: `@vercel/ncc` → single CJS file at `dist/index.js`.
 - **TypeScript**: `moduleResolution: "Bundler"`, `module: "ESNext"` — required because `@actions/github@9` ships ESM-only exports.
 - **Linting**: ESLint + typescript-eslint + Prettier (CI enforces `format:check` before lint).
-- **Testing**: Vitest (452 tests across 17 files).
+- **Testing**: Vitest (453 tests across 17 files as of Apr 29, 2026).
 
 ### CI pipeline
 
@@ -675,16 +682,18 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 5. `npm run build` — ncc bundle
 6. `git diff --exit-code dist/` — verifies committed `dist/` matches fresh build
 
-**Note**: This repo uses `main` (not `dev`). Substitute `main` wherever the HQ protocol says `dev`.
+**Note**: This repo uses `main` (not `dev`). Substitute `main` wherever the HQ protocol says `dev`. `dev` and `staging` are currently mirrors of `main`.
 
 ### Conventions
 
 - GitHub Action contract: **`action.yml`** ↔ **`src/main.ts`** (inputs/outputs must stay in sync).
 - Action runtime bundle: **`src/`** → **`dist/index.js`** via `@vercel/ncc` (`npm run build`).
 - **`src/risk-engine.ts`** — pure module with no `@actions/*` deps, shared via prebuild copy to `mcp/src/` and `app/src/`.
+- **`mcp/src/adapters/*`** and **`mcp/dist/adapters/*`** — generated/prebuild copies that are intentionally committed so `mcp/dist/server.js` resolves runtime imports without a local build step.
 - **`app/`** and **`mcp/`** are separate TypeScript projects; match their local patterns when editing.
 - **`cli/`** — ESM wizard; run `cd cli && npx tsc` after edits.
 - Always run `npm run format` before committing — CI will reject unformatted code.
+- **`.trailhead.yml`** — canonical repo policy. `.deployguard.yml` is still accepted as a legacy fallback for consumers.
 
 ### Risk factors (10 types)
 
@@ -713,11 +722,11 @@ DeployGuard is a GitHub Action (current release **v3.0.x**, floating tag **`v3`*
 | `src/dora.ts`        | DORA-5 metrics computation                          |
 | `src/main.ts`        | Action entry point                                  |
 | `src/types.ts`       | Zod schemas + TypeScript types                      |
-| `src/config.ts`      | `.deployguard.yml` parser                           |
+| `src/config.ts`      | `.trailhead.yml` parser with legacy `.deployguard.yml` fallback |
 | `src/notify.ts`      | Webhook + evaluation store                          |
 | `src/otel.ts`        | OpenTelemetry span export                           |
 | `mcp/src/server.ts`  | MCP server (12 tools)                               |
 | `app/src/handler.ts` | GitHub App webhook handler                          |
 | `app/src/server.ts`  | Hono HTTP server                                    |
-| `cli/src/index.ts`   | `deployguard init` wizard                           |
-| `src/__tests__/`     | Vitest test suite (452 tests, 17 files)             |
+| `cli/src/index.ts`   | `trailhead init` wizard                             |
+| `src/__tests__/`     | Vitest test suite (453 tests, 17 files)             |

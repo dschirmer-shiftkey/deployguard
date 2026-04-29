@@ -82,6 +82,18 @@ Tools that don't require environment variables (`compute-risk-score`, `evaluate-
 
 The MCP server uses the same `risk-engine.ts` as the GitHub Action and App. The `prebuild` script copies it from `src/` before each build, ensuring scoring consistency across all three interfaces.
 
+The committed MCP distribution includes the runtime modules imported by `dist/server.js`:
+
+- `mcp/dist/risk-engine.js`
+- `mcp/dist/adapters/*`
+
+The adapter source copies in `mcp/src/adapters/*` are generated from the canonical
+`src/adapters/*` files during `npm run build` and are intentionally committed so the
+published/checked-out MCP server can run without a local prebuild step.
+
+When adding a new local dependency to `src/risk-engine.ts`, update the MCP prebuild script
+and committed `mcp/dist/*` artifacts in the same change.
+
 ## Resources
 
 The server exposes a `server-card` resource at `trailhead://server-card` with metadata about the server version, capabilities, and available tools.

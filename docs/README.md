@@ -128,6 +128,12 @@ environments:
 
 Both the Action and the App respect these overrides when `environment` is set.
 
+Trailhead prefers `.trailhead.yml` from the checked-out workspace. For existing installs,
+legacy `.deployguard.yml` is still accepted when `.trailhead.yml` is absent.
+
+This repository's `.trailhead.yml` ignores generated MCP copy/artifact paths so risk scores
+reflect canonical source changes instead of prebuild output.
+
 ## Monorepo Service Boundaries
 
 Define independent services for monorepos — each gets its own risk evaluation:
@@ -173,6 +179,18 @@ Persist evaluation results for trend analysis:
 1. **Primary**: POST JSON to `evaluation-store-url` with `evaluation-store-secret` as Bearer token.
 2. **Vercel protection**: Set `VERCEL_AUTOMATION_BYPASS_SECRET` env to add `x-vercel-protection-bypass` header.
 3. **Fallback**: Direct Supabase PostgREST insert when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set.
+
+The current fallback table is `trailhead_evaluations`.
+
+## Branch and Release Context
+
+This repository uses `main` as the active/default branch. `dev` and `staging` are kept
+fast-forwarded to `main` for compatibility with older automation, and open PRs should target
+`main`.
+
+The unmerged branch `origin/experiment/rd-satellite/deployguard-supply-chain-risk` is known
+not to be promotion-ready: its targeted tests pass, but `app` and `mcp` builds fail until
+their prebuild scripts copy the new `supply-chain` module alongside `risk-engine.ts`.
 
 ## Key Decisions
 
