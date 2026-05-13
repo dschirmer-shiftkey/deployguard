@@ -1,0 +1,47 @@
+name: Trailhead enforced gate (trailhead)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  security-events: read
+  deployments: read
+
+jobs:
+  trailhead:
+    name: Trailhead
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: KomatikAI/trailhead@v3
+        with:
+          environment: production
+          dora-metrics: "true"
+          security-gate: "true"
+
+  ci-lint:
+    name: CI / lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Replace with lint command"
+
+  ci-test:
+    name: CI / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Replace with test command"
+
+  deploy-production:
+    name: Deploy / production
+    needs: [trailhead, ci-lint, ci-test]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Replace with production deployment validation check"

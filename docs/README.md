@@ -134,6 +134,28 @@ legacy `.deployguard.yml` is still accepted when `.trailhead.yml` is absent.
 This repository's `.trailhead.yml` ignores generated MCP copy/artifact paths so risk scores
 reflect canonical source changes instead of prebuild output.
 
+## Policy Profiles and Governed Overrides
+
+Trailhead ships an environment-aware fail policy by default:
+
+- `production` defaults to fail-closed (blocks when Trailhead itself fails)
+- all other environments default to fail-open with visible warnings
+
+You can still override policy settings temporarily, but overrides are enforceable and auditable.
+Any `override-*` input requires:
+
+- owner
+- reason
+- linked ticket
+- expiry timestamp
+
+Active overrides are included in the gate report and evaluation payload.
+
+For reusable starter packs and governance templates, use `examples/policy-pack/`.
+
+For Phase 2 (enforcement, canary-first promotion, and unblock operations), use
+`examples/policy-pack/phase-2/`.
+
 ## Monorepo Service Boundaries
 
 Define independent services for monorepos — each gets its own risk evaluation:

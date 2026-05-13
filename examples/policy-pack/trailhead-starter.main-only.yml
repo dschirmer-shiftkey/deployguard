@@ -1,0 +1,26 @@
+# Starter policy for repositories using main only.
+
+thresholds:
+  risk: 75
+  warn: 55
+
+environments:
+  production:
+    risk: 65
+    warn: 45
+    require_security_clear: true
+  dev:
+    risk: 80
+    warn: 60
+
+security:
+  severity_threshold: warning
+  block_on_critical: true
+
+freeze:
+  - days: ["friday", "saturday"]
+    afterHour: 15
+    message: "Release freeze window in effect"
+
+ignore:
+  - "*.generated.ts"

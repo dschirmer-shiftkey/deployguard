@@ -69,28 +69,35 @@ The weighted average determines the decision:
 
 ## Inputs
 
-| Input                     | Required | Default               | Description                                                      |
-| ------------------------- | -------- | --------------------- | ---------------------------------------------------------------- |
-| `github-token`            | No       | `${{ github.token }}` | GitHub token for PR analysis and comments                        |
-| `risk-threshold`          | No       | `70`                  | Block the PR above this risk score (0-100)                       |
-| `warn-threshold`          | No       | risk - 15             | Warn above this risk score (0-100)                               |
-| `health-check-urls`       | No       | —                     | Comma-separated URLs to health-check before scoring              |
-| `fail-mode`               | No       | `open`                | What happens when Trailhead errors: `open` or `closed`           |
-| `self-heal`               | No       | `false`               | Auto-repair failing tests (needs `TRAILHEAD_TEST_FAILURES` env)  |
-| `add-risk-labels`         | No       | `true`                | Add `trailhead:low-risk` / `warn` / `high-risk` labels to the PR |
-| `reviewers-on-risk`       | No       | —                     | Comma-separated usernames to request review on warn/block        |
-| `webhook-url`             | No       | —                     | URL to POST results to (Slack, Discord, custom)                  |
-| `webhook-events`          | No       | `warn,block`          | Which decisions trigger the webhook                              |
-| `evaluation-store-url`    | No       | —                     | URL to POST evaluations for trend dashboards                     |
-| `evaluation-store-secret` | No       | —                     | Bearer token for `evaluation-store-url`                          |
-| `dora-metrics`            | No       | `false`               | Compute DORA-5 metrics alongside the gate evaluation             |
-| `dora-environment`        | No       | —                     | Filter DORA metrics to a specific deployment environment         |
-| `environment`             | No       | —                     | Target deployment environment (for per-env threshold overrides)  |
-| `security-gate`           | No       | `true`                | Enable Code Scanning alerts as a risk factor                     |
-| `canary-webhook-secret`   | No       | —                     | HMAC secret for deploy outcome webhooks                          |
-| `otel-endpoint`           | No       | —                     | OTLP HTTP endpoint for exporting evaluation spans                |
-| `otel-headers`            | No       | —                     | Auth headers for the OTLP endpoint (key=value, comma-separated)  |
-| `api-key`                 | No       | —                     | API key for remote enrichment (omit for local-only)              |
+| Input                     | Required | Default               | Description                                                                            |
+| ------------------------- | -------- | --------------------- | -------------------------------------------------------------------------------------- |
+| `github-token`            | No       | `${{ github.token }}` | GitHub token for PR analysis and comments                                              |
+| `risk-threshold`          | No       | `70`                  | Block the PR above this risk score (0-100)                                             |
+| `warn-threshold`          | No       | risk - 15             | Warn above this risk score (0-100)                                                     |
+| `health-check-urls`       | No       | —                     | Comma-separated URLs to health-check before scoring                                    |
+| `fail-mode`               | No       | env-aware             | Error policy: explicit `open`/`closed`, or auto (`production`=`closed`, others=`open`) |
+| `override-fail-mode`      | No       | —                     | Governed temporary override for fail mode (requires override metadata)                 |
+| `override-risk-threshold` | No       | —                     | Governed temporary risk threshold override (0-100)                                     |
+| `override-warn-threshold` | No       | —                     | Governed temporary warn threshold override (0-100)                                     |
+| `override-reason`         | No       | —                     | Required when any override is set                                                      |
+| `override-owner`          | No       | —                     | Required when any override is set                                                      |
+| `override-ticket`         | No       | —                     | Required when any override is set                                                      |
+| `override-expires-at`     | No       | —                     | Required when any override is set (ISO-8601)                                           |
+| `self-heal`               | No       | `false`               | Auto-repair failing tests (needs `TRAILHEAD_TEST_FAILURES` env)                        |
+| `add-risk-labels`         | No       | `true`                | Add `trailhead:low-risk` / `warn` / `high-risk` labels to the PR                       |
+| `reviewers-on-risk`       | No       | —                     | Comma-separated usernames to request review on warn/block                              |
+| `webhook-url`             | No       | —                     | URL to POST results to (Slack, Discord, custom)                                        |
+| `webhook-events`          | No       | `warn,block`          | Which decisions trigger the webhook                                                    |
+| `evaluation-store-url`    | No       | —                     | URL to POST evaluations for trend dashboards                                           |
+| `evaluation-store-secret` | No       | —                     | Bearer token for `evaluation-store-url`                                                |
+| `dora-metrics`            | No       | `false`               | Compute DORA-5 metrics alongside the gate evaluation                                   |
+| `dora-environment`        | No       | —                     | Filter DORA metrics to a specific deployment environment                               |
+| `environment`             | No       | —                     | Target deployment environment (for per-env threshold overrides)                        |
+| `security-gate`           | No       | `true`                | Enable Code Scanning alerts as a risk factor                                           |
+| `canary-webhook-secret`   | No       | —                     | HMAC secret for deploy outcome webhooks                                                |
+| `otel-endpoint`           | No       | —                     | OTLP HTTP endpoint for exporting evaluation spans                                      |
+| `otel-headers`            | No       | —                     | Auth headers for the OTLP endpoint (key=value, comma-separated)                        |
+| `api-key`                 | No       | —                     | API key for remote enrichment (omit for local-only)                                    |
 
 ## Outputs
 
@@ -228,6 +235,24 @@ Compatibility remains for shipped surfaces:
 - Old `deployguard:*` risk labels are removed when Trailhead applies the new
   `trailhead:*` risk label.
 
+## Policy Profiles and Overrides
+
+Trailhead now supports environment-aware defaults out of the box:
+
+- `production` defaults to fail-closed when `fail-mode` is not set.
+- `staging`, `dev`, and other environments default to fail-open with warning visibility.
+
+Temporary overrides are supported but governed. If any override input is set (`override-*`),
+Trailhead requires:
+
+- `override-reason`
+- `override-owner`
+- `override-ticket`
+- `override-expires-at` (future ISO-8601 timestamp)
+
+Applied overrides are attached to `evaluation-json`, included in PR reports, and carried through
+evaluation storage/webhooks for auditability.
+
 ---
 
 ## GitHub App
@@ -326,6 +351,7 @@ Interactive wizard that generates `.trailhead.yml` and the workflow YAML with al
 - [Multi-CI templates](examples/) — GitLab CI and CircleCI configurations
 - [Observability dashboards](examples/observability/) — Grafana and Datadog dashboard imports
 - [Auto-rollback workflow](examples/github-actions/) — automated rollback on deployment failure
+- [Policy rollout pack](examples/policy-pack/) — Phase 1 and Phase 2 governance/enforcement templates
 
 ---
 

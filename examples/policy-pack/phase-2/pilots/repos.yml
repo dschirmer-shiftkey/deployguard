@@ -1,0 +1,29 @@
+pilot_repos:
+  - name: komatik-base-camp
+    criticality: low
+    branch_strategy: main-only
+    default_branch: main
+    required_deployments:
+      - production
+    owners:
+      - tbd
+    notes: "Dashboard and coordination surface; lower direct production blast radius."
+  - name: trailhead
+    criticality: medium
+    branch_strategy: main-only
+    default_branch: main
+    required_deployments:
+      - production
+    owners:
+      - tbd
+    notes: "Deployment-control layer; medium platform-wide operational risk."
+  - name: komatik
+    criticality: high
+    branch_strategy: progressive
+    default_branch: dev
+    required_deployments:
+      - staging
+      - production
+    owners:
+      - tbd
+    notes: "Core platform with auth/payments and highest customer impact."
