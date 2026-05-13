@@ -22,6 +22,26 @@ import { cypressHealer } from "./healers/cypress.js";
 import { fetchCodeScanningAlerts, formatSecuritySection } from "./security.js";
 import type { TrailheadConfig, TestRepairResult } from "./types.js";
 
+class PolicyOverrideError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PolicyOverrideError";
+  }
+}
+
+interface PolicyOverrideAudit {
+  owner: string;
+  reason: string;
+  linkedTicket: string;
+  expiresAt: string;
+  appliedAt: string;
+  changes: {
+    failMode?: "open" | "closed";
+    riskThreshold?: number;
+    warnThreshold?: number;
+  };
+}
+
 function initHealers(): void {
   registerHealer(jestHealer);
   registerHealer(playwrightHealer);
@@ -30,6 +50,79 @@ function initHealers(): void {
 
 function readEnv(primary: string, legacy?: string): string | undefined {
   return process.env[primary] ?? (legacy ? process.env[legacy] : undefined);
+}
+
+function parseThresholdInput(name: string): number | undefined {
+  const value = core.getInput(name);
+  if (!value) return undefined;
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+    throw new PolicyOverrideError(`${name} must be an integer between 0 and 100`);
+  }
+  return parsed;
+}
+
+function resolveFailMode(
+  failModeInput: string,
+  environment: string | undefined,
+): "open" | "closed" {
+  const explicitFailMode = failModeInput as "open" | "closed" | "";
+  if (explicitFailMode === "open" || explicitFailMode === "closed") {
+    return explicitFailMode;
+  }
+  return environment === "production" ? "closed" : "open";
+}
+
+function resolvePolicyOverride(): PolicyOverrideAudit | null {
+  const overrideFailModeRaw = core.getInput("override-fail-mode");
+  const overrideFailMode =
+    overrideFailModeRaw === "open" || overrideFailModeRaw === "closed"
+      ? overrideFailModeRaw
+      : undefined;
+  const overrideRiskThreshold = parseThresholdInput("override-risk-threshold");
+  const overrideWarnThreshold = parseThresholdInput("override-warn-threshold");
+  const hasOverride =
+    overrideFailMode !== undefined ||
+    overrideRiskThreshold !== undefined ||
+    overrideWarnThreshold !== undefined;
+
+  if (!hasOverride) return null;
+
+  const reason = core.getInput("override-reason").trim();
+  const owner = core.getInput("override-owner").trim();
+  const linkedTicket = core.getInput("override-ticket").trim();
+  const expiresAt = core.getInput("override-expires-at").trim();
+
+  if (!reason || !owner || !linkedTicket || !expiresAt) {
+    throw new PolicyOverrideError(
+      "Overrides require override-reason, override-owner, override-ticket, and override-expires-at",
+    );
+  }
+
+  const expiresMs = Date.parse(expiresAt);
+  if (Number.isNaN(expiresMs)) {
+    throw new PolicyOverrideError(
+      "override-expires-at must be a valid ISO-8601 datetime",
+    );
+  }
+  if (expiresMs <= Date.now()) {
+    throw new PolicyOverrideError(
+      `Override expired at ${expiresAt}. Extend expiry before applying.`,
+    );
+  }
+
+  return {
+    owner,
+    reason,
+    linkedTicket,
+    expiresAt: new Date(expiresMs).toISOString(),
+    appliedAt: new Date().toISOString(),
+    changes: {
+      failMode: overrideFailMode,
+      riskThreshold: overrideRiskThreshold,
+      warnThreshold: overrideWarnThreshold,
+    },
+  };
 }
 
 async function runSelfHeal(
@@ -87,6 +180,9 @@ async function runSelfHeal(
 async function run(): Promise<void> {
   try {
     initHealers();
+    const environment = core.getInput("environment") || undefined;
+    const policyOverride = resolvePolicyOverride();
+    const failMode = resolveFailMode(core.getInput("fail-mode"), environment);
 
     const config: TrailheadConfig = {
       apiKey: core.getInput("api-key") || "",
@@ -100,7 +196,7 @@ async function run(): Promise<void> {
       warnThreshold: core.getInput("warn-threshold")
         ? parseInt(core.getInput("warn-threshold"), 10)
         : undefined,
-      failMode: (core.getInput("fail-mode") as "open" | "closed") || "open",
+      failMode,
       selfHeal: core.getInput("self-heal") !== "false",
       addRiskLabels: core.getInput("add-risk-labels") !== "false",
       reviewersOnRisk: core.getInput("reviewers-on-risk")
@@ -116,9 +212,25 @@ async function run(): Promise<void> {
         .map((s) => s.trim())
         .filter(Boolean),
       evaluationStoreUrl: core.getInput("evaluation-store-url") || undefined,
-      environment: core.getInput("environment") || undefined,
+      environment,
       securityGate: core.getInput("security-gate") !== "false",
     };
+
+    if (policyOverride?.changes.riskThreshold !== undefined) {
+      config.riskThreshold = policyOverride.changes.riskThreshold;
+    }
+    if (policyOverride?.changes.warnThreshold !== undefined) {
+      config.warnThreshold = policyOverride.changes.warnThreshold;
+    }
+    if (policyOverride?.changes.failMode !== undefined) {
+      config.failMode = policyOverride.changes.failMode;
+    }
+
+    if (policyOverride) {
+      core.warning(
+        `Governed override active (${policyOverride.linkedTicket}) by ${policyOverride.owner}; expires ${policyOverride.expiresAt}.`,
+      );
+    }
 
     const context = github.context;
     const commitSha = context.sha;
@@ -127,6 +239,9 @@ async function run(): Promise<void> {
     core.info(`Evaluating deployment gate for ${commitSha.substring(0, 7)}`);
 
     const evaluation = await evaluateGate(config, commitSha, prNumber);
+    if (policyOverride) {
+      evaluation.policyOverride = policyOverride;
+    }
 
     core.setOutput("health-score", evaluation.healthScore.toString());
     core.setOutput("risk-score", evaluation.riskScore.toString());
@@ -287,7 +402,13 @@ async function run(): Promise<void> {
       }
     }
   } catch (error) {
-    const failMode = core.getInput("fail-mode") || "open";
+    if (error instanceof PolicyOverrideError) {
+      core.setFailed(`Invalid policy override: ${error.message}`);
+      return;
+    }
+
+    const environment = core.getInput("environment") || undefined;
+    const failMode = resolveFailMode(core.getInput("fail-mode"), environment);
     if (failMode === "open") {
       core.warning(
         `Trailhead evaluation failed — proceeding with deployment (fail-open). Error: ${error}`,
