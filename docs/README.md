@@ -184,9 +184,9 @@ The current fallback table is `trailhead_evaluations`.
 
 ## Branch and Release Context
 
-This repository uses `main` as the active/default branch. `dev` and `staging` are kept
-fast-forwarded to `main` for compatibility with older automation, and open PRs should target
-`main`.
+This repository uses `dev` as the active/default branch. `main` and `staging` are kept
+fast-forwarded to `dev` for compatibility with older automation, and open PRs should target
+`dev`.
 
 The unmerged branch `origin/experiment/rd-satellite/deployguard-supply-chain-risk` is known
 not to be promotion-ready: its targeted tests pass, but `app` and `mcp` builds fail until
