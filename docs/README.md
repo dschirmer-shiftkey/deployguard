@@ -6,7 +6,7 @@ Trailhead is a deployment gate available in three forms:
 
 1. **GitHub Action** (`@v3`) — the primary distribution. Runs in CI on every PR.
 2. **GitHub App** (`app/`) — a webhook server that acts as a Custom Deployment Protection Rule.
-3. **MCP Server** (`mcp/`) — 17 tools for AI agents via the Model Context Protocol.
+3. **MCP Server** (`mcp/`) — 21 tools for AI agents via the Model Context Protocol.
 
 All three share a single **risk engine** (`src/risk-engine.ts`) — a pure TypeScript module with no framework dependencies. This ensures scoring consistency regardless of which interface evaluates the code.
 

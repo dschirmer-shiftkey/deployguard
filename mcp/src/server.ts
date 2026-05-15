@@ -198,6 +198,32 @@ function detectSupplyChain(files: Array<{ filename: string; patch?: string }>): 
   };
 }
 
+interface DetectorFeedbackRecord {
+  detector: string;
+  repo?: string;
+  disposition: "false_positive" | "true_positive" | "dismissed";
+  reason?: string;
+  timestamp: string;
+}
+
+async function loadFeedbackRecords(): Promise<DetectorFeedbackRecord[]> {
+  const fs = await import("node:fs/promises");
+  const path = process.env.TRAILHEAD_FEEDBACK_STORE ?? ".trailhead-feedback.json";
+  try {
+    const raw = await fs.readFile(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as DetectorFeedbackRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveFeedbackRecords(records: DetectorFeedbackRecord[]): Promise<void> {
+  const fs = await import("node:fs/promises");
+  const path = process.env.TRAILHEAD_FEEDBACK_STORE ?? ".trailhead-feedback.json";
+  await fs.writeFile(path, JSON.stringify(records, null, 2), "utf-8");
+}
+
 const server = new McpServer({
   name: "trailhead",
   version: "4.1.0",
@@ -1434,6 +1460,166 @@ server.tool(
   },
 );
 
+server.tool(
+  "record-finding-feedback",
+  "Record detector feedback for false-positive tuning and trust calibration.",
+  {
+    detector: z.string().describe("Detector key (e.g. ci_integrity, supply_chain)"),
+    disposition: z
+      .enum(["false_positive", "true_positive", "dismissed"])
+      .describe("Outcome classification"),
+    repo: z.string().optional().describe("Optional repository id"),
+    reason: z.string().optional().describe("Optional freeform reason"),
+  },
+  async ({ detector, disposition, repo, reason }): Promise<ToolReturn> => {
+    const records = await loadFeedbackRecords();
+    records.push({
+      detector,
+      repo,
+      disposition,
+      reason,
+      timestamp: new Date().toISOString(),
+    });
+    await saveFeedbackRecords(records);
+    return jsonResult({
+      stored: true,
+      totalRecords: records.length,
+      detector,
+      disposition,
+    });
+  },
+);
+
+server.tool(
+  "get-detector-noise",
+  "Aggregate detector feedback and return false-positive rates by detector.",
+  {
+    repo: z.string().optional().describe("Optional repository id filter"),
+  },
+  async ({ repo }): Promise<ToolReturn> => {
+    const records = await loadFeedbackRecords();
+    const filtered = repo ? records.filter((r) => r.repo === repo) : records;
+    const byDetector = new Map<
+      string,
+      { total: number; falsePositive: number; truePositive: number; dismissed: number }
+    >();
+
+    for (const record of filtered) {
+      const entry = byDetector.get(record.detector) ?? {
+        total: 0,
+        falsePositive: 0,
+        truePositive: 0,
+        dismissed: 0,
+      };
+      entry.total += 1;
+      if (record.disposition === "false_positive") entry.falsePositive += 1;
+      if (record.disposition === "true_positive") entry.truePositive += 1;
+      if (record.disposition === "dismissed") entry.dismissed += 1;
+      byDetector.set(record.detector, entry);
+    }
+
+    const summary = [...byDetector.entries()].map(([detector, entry]) => ({
+      detector,
+      ...entry,
+      falsePositiveRate:
+        entry.total > 0 ? Math.round((entry.falsePositive / entry.total) * 1000) / 10 : 0,
+    }));
+
+    return jsonResult({
+      repo: repo ?? null,
+      recordsAnalyzed: filtered.length,
+      detectors: summary.sort((a, b) => b.falsePositiveRate - a.falsePositiveRate),
+    });
+  },
+);
+
+server.tool(
+  "recommend-policy-tuning",
+  "Propose detector threshold/policy tuning from observed feedback noise.",
+  {
+    repo: z.string().optional().describe("Optional repository id filter"),
+    falsePositiveThreshold: z.number().min(0).max(100).default(15),
+  },
+  async ({ repo, falsePositiveThreshold }): Promise<ToolReturn> => {
+    const records = await loadFeedbackRecords();
+    const filtered = repo ? records.filter((r) => r.repo === repo) : records;
+    const detectorStats = new Map<string, { total: number; falsePositive: number }>();
+
+    for (const record of filtered) {
+      const entry = detectorStats.get(record.detector) ?? { total: 0, falsePositive: 0 };
+      entry.total += 1;
+      if (record.disposition === "false_positive") entry.falsePositive += 1;
+      detectorStats.set(record.detector, entry);
+    }
+
+    const recommendations = [...detectorStats.entries()]
+      .map(([detector, stat]) => ({
+        detector,
+        samples: stat.total,
+        falsePositiveRate:
+          stat.total > 0 ? Math.round((stat.falsePositive / stat.total) * 1000) / 10 : 0,
+      }))
+      .filter((s) => s.falsePositiveRate > falsePositiveThreshold)
+      .map((s) => ({
+        detector: s.detector,
+        recommendation: `Reduce sensitivity or switch ${s.detector} to warn mode for this repo`,
+        expectedImpact: "Lower review noise while preserving detector visibility",
+        confidence: s.samples >= 20 ? "high" : s.samples >= 8 ? "medium" : "low",
+        falsePositiveRate: s.falsePositiveRate,
+      }));
+
+    return jsonResult({
+      repo: repo ?? null,
+      falsePositiveThreshold,
+      recommendations,
+      generatedAt: new Date().toISOString(),
+    });
+  },
+);
+
+server.tool(
+  "recommend-rollback",
+  "Recommend rollback action based on canary failure and PR provenance.",
+  {
+    provenanceType: z
+      .enum([
+        "human",
+        "dependabot",
+        "copilot",
+        "codex",
+        "claude",
+        "custom-bot",
+        "unknown",
+      ])
+      .describe("Detected provenance for the merged change"),
+    canaryFailed: z.boolean().describe("Whether canary/post-merge health checks failed"),
+    mode: z.enum(["off", "proposal", "auto"]).default("proposal"),
+  },
+  async ({ provenanceType, canaryFailed, mode }): Promise<ToolReturn> => {
+    if (!canaryFailed || mode === "off") {
+      return jsonResult({
+        action: "none",
+        reason: "No failure signal or rollback mode disabled",
+      });
+    }
+
+    const isAgent = provenanceType !== "human";
+    if (!isAgent) {
+      return jsonResult({
+        action: "manual-review",
+        reason: "Rollback automation restricted to non-human provenance by default",
+      });
+    }
+
+    return jsonResult({
+      action: mode === "auto" ? "open-revert-pr" : "propose-revert-pr",
+      reason: "Canary failure correlated with automated provenance merge",
+      provenanceType,
+      mode,
+    });
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Health Resource — trailhead://health (DG9: cached aggregate health)
 // ---------------------------------------------------------------------------
@@ -1532,6 +1718,10 @@ server.resource(
               "suggest-deploy-timing",
               "query-overrides",
               "get-escalation-status",
+              "record-finding-feedback",
+              "get-detector-noise",
+              "recommend-policy-tuning",
+              "recommend-rollback",
             ],
             resources: ["trailhead://health", "trailhead://server-card"],
             adapters: ["vercel", "supabase", "aws-ecs", "fly-io", "cloudflare"],
