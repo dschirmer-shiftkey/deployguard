@@ -127,6 +127,8 @@ outputs:
     description: "URL to the full evaluation report (only set when using a remote API)."
   evaluation-json:
     description: "Full gate evaluation as JSON for downstream workflow steps."
+  rollout-readiness-json:
+    description: "Rollout readiness summary (go/review/hold) derived from the evaluation."
   dora-deployment-frequency:
     description: "DORA deployment frequency (e.g. '4.2 per week'). Only set when dora-metrics is true."
   dora-change-failure-rate:

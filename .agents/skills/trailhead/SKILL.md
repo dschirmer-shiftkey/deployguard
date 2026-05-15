@@ -26,20 +26,27 @@ If a health check returns `degraded` or `down` after deploy, surface it immediat
 
 ## Risk Scoring
 
-Trailhead scores PRs on a 0–100 scale using 10 weighted factors:
+Trailhead scores PRs on a 0–100 scale using policy-weighted factors (core + governance + security):
 
-| Factor               | Weight | What triggers high scores                                             |
-| -------------------- | ------ | --------------------------------------------------------------------- |
-| `security_alerts`    | 4      | Critical/high code scanning alerts                                    |
-| `code_churn`         | 3      | Large diffs, especially in sensitive files (auth 3x, infra 2x weight) |
-| `sensitive_files`    | 3      | Changes to auth, migrations, payments, CI, secrets, env files         |
-| `file_count`         | 2      | Many files changed (log scale)                                        |
-| `test_coverage`      | 2      | Low ratio of test files to source files in the PR                     |
-| `dependency_changes` | 2      | Lock file or manifest changes                                         |
-| `deployment_history` | 2      | Recent deployment failures in target env                              |
-| `canary_status`      | 2      | Canary/progressive rollout signals                                    |
-| `author_history`     | 1      | Author unfamiliar with the repo (< 90-day commit history)             |
-| `pr_age`             | 1      | Stale PRs penalized                                                   |
+| Factor                  | Weight | What triggers high scores                                               |
+| ----------------------- | ------ | ----------------------------------------------------------------------- | --- | --------------------------------------- |
+| `security_alerts`       | 4      | Critical/high code scanning alerts                                      |
+| `code_churn`            | 3      | Large diffs, especially in sensitive files (auth 3x, infra 2x weight)   |
+| `sensitive_files`       | 3      | Changes to auth, migrations, payments, CI, secrets, env files           |
+| `file_count`            | 2      | Many files changed (log scale)                                          |
+| `test_coverage`         | 2      | Low ratio of test files to source files in the PR                       |
+| `dependency_changes`    | 2      | Lock file or manifest changes                                           |
+| `deployment_history`    | 2      | Recent deployment failures in target env                                |
+| `canary_status`         | 2      | Canary/progressive rollout signals                                      |
+| `author_history`        | 1      | Author unfamiliar with the repo (< 90-day commit history)               |
+| `pr_age`                | 1      | Stale PRs penalized                                                     |
+| `ci_integrity`          | 3      | CI confidence downgrades (`                                             |     | true`, `continue-on-error`, test wipes) |
+| `workflow_security`     | 4      | Workflow hardening issues (unpinned actions, risky shell interpolation) |
+| `prompt_injection_risk` | 4      | Untrusted input flowing into prompt/command paths                       |
+| `supply_chain`          | 3      | New deps, major jumps, critical vuln markers                            |
+| `pr_scope`              | 2      | Oversized mixed-scope PRs and missing decomposition plan                |
+| `duplicate_logic`       | 1      | Potential helper/utility duplication drift                              |
+| `cross_repo_impact`     | 2      | Contract-surface changes affecting declared consumers                   |
 
 Decisions: **allow** (< 55), **warn** (55–70), **block** (> 70).
 
@@ -54,7 +61,7 @@ When reviewing PRs or evaluating deploys, always check:
 
 ## MCP Tools
 
-Use these tools via the Trailhead MCP server. Tools that don't require environment variables work with zero configuration.
+Use these tools via the Trailhead MCP server (21 tools). Tools that don't require environment variables work with zero configuration.
 
 ### Pre-Merge (run on every PR)
 
@@ -77,6 +84,18 @@ Use these tools via the Trailhead MCP server. Tools that don't require environme
 - **`suggest-deploy-timing`** — Is now safe to deploy? Checks freeze windows and recent failure patterns.
 - **`get-deployment-status`** — Current deployment state for a specific environment.
 
+### Governance & Operations
+
+- **`detect-provenance`** — Classify PR origin (`human`, `codex`, `claude`, `dependabot`, etc.).
+- **`check-ci-integrity`** — Detect CI bypass and confidence downgrade patterns.
+- **`check-supply-chain`** — Detect dependency-introduction and vulnerability signals.
+- **`query-overrides`** — Query governed override records by repo/environment/time window.
+- **`get-escalation-status`** — Evaluate escalation SLA state (`within_sla` vs `breached`).
+- **`record-finding-feedback`** — Capture true/false-positive feedback for detectors.
+- **`get-detector-noise`** — Aggregate detector noise/false-positive rates.
+- **`recommend-policy-tuning`** — Generate threshold/mode tuning proposals from feedback.
+- **`recommend-rollback`** — Propose/trigger rollback recommendation from canary + provenance.
+
 ## Workflow
 
 The standard Trailhead workflow for any PR:
@@ -87,6 +106,7 @@ The standard Trailhead workflow for any PR:
 4. **If clear** → approve merge
 5. **After deploy** → `check-http-health` (and provider-specific checks if configured)
 6. **If health fails** → `get-deployment-status` + surface the issue immediately
+7. **After decision** → inspect rollout readiness (`rollout-readiness-json`) for go/review/hold guidance
 
 ## Configuration
 
@@ -97,6 +117,7 @@ Trailhead reads `.trailhead.yml` (or legacy `.deployguard.yml`) from the repo ro
 - Freeze window schedules
 - Health check endpoints
 - Webhook notification targets (Slack, Discord, custom)
+- Agent policy strictness (`policies.*`), escalation SLAs, service contracts/consumers
 
 If no config file exists, sensible defaults apply (block at 70, warn at 55).
 

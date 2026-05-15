@@ -16,6 +16,7 @@ vi.mock("@actions/github", () => ({
 }));
 
 import * as github from "@actions/github";
+import * as core from "@actions/core";
 import { loadRepoConfig, matchesGlobs } from "../config.js";
 
 function encodeYaml(yaml: string): string {
@@ -188,6 +189,151 @@ describe("loadRepoConfig", () => {
       },
     } as unknown as ReturnType<typeof github.getOctokit>);
     expect(await loadRepoConfig("ghp_test")).toBeNull();
+  });
+
+  it("warns on unknown top-level keys but still parses known keys", async () => {
+    mockOctokit(
+      `thresholds:
+  risk: 72
+unexpected_key: true`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.thresholds.risk).toBe(72);
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(
+      expect.stringContaining('unknown top-level key "unexpected_key"'),
+    );
+  });
+
+  it("returns null for unsupported schema_version with migration warning", async () => {
+    mockOctokit(
+      `schema_version: 2
+thresholds:
+  risk: 80`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).toBeNull();
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(
+      expect.stringContaining("unsupported schema_version=2"),
+    );
+  });
+
+  it("parses nested agent PR policies", async () => {
+    mockOctokit(
+      `schema_version: 1
+policies:
+  agent_prs:
+    enabled: true
+    risk_threshold: 55
+    required_approvals: 2
+    require_code_owner_approval: true
+    code_owner_reviewers:
+      - "alice"
+      - "bob"
+    sensitive_paths:
+      - "src/auth/**"`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.policies.agent_prs.enabled).toBe(true);
+    expect(config!.policies.agent_prs.risk_threshold).toBe(55);
+    expect(config!.policies.agent_prs.required_approvals).toBe(2);
+    expect(config!.policies.agent_prs.require_code_owner_approval).toBe(true);
+    expect(config!.policies.agent_prs.code_owner_reviewers).toEqual(["alice", "bob"]);
+    expect(config!.policies.agent_prs.sensitive_paths).toEqual(["src/auth/**"]);
+  });
+
+  it("parses session correlation and ci integrity policy blocks", async () => {
+    mockOctokit(
+      `schema_version: 1
+policies:
+  session_correlation:
+    enabled: true
+    threshold: 4
+    window_minutes: 90
+    mode: "block"
+  ci_integrity:
+    enabled: true
+    mode: "warn"`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.policies.session_correlation.enabled).toBe(true);
+    expect(config!.policies.session_correlation.threshold).toBe(4);
+    expect(config!.policies.session_correlation.window_minutes).toBe(90);
+    expect(config!.policies.session_correlation.mode).toBe("block");
+    expect(config!.policies.ci_integrity.mode).toBe("warn");
+  });
+
+  it("parses workflow, prompt, and supply chain policy blocks", async () => {
+    mockOctokit(
+      `schema_version: 1
+policies:
+  workflow_security:
+    enabled: true
+    mode: "block"
+    allow_unpinned_actions:
+      - "actions/checkout"
+  prompt_injection:
+    enabled: true
+    mode: "warn"
+  supply_chain:
+    enabled: true
+    mode: "block"
+    force_score_on_critical: 85`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.policies.workflow_security.enabled).toBe(true);
+    expect(config!.policies.workflow_security.mode).toBe("block");
+    expect(config!.policies.workflow_security.allow_unpinned_actions).toEqual([
+      "actions/checkout",
+    ]);
+    expect(config!.policies.prompt_injection.mode).toBe("warn");
+    expect(config!.policies.supply_chain.mode).toBe("block");
+    expect(config!.policies.supply_chain.force_score_on_critical).toBe(85);
+  });
+
+  it("parses pr scope, cross-repo impact, duplicate logic, and escalation blocks", async () => {
+    mockOctokit(
+      `schema_version: 1
+services:
+  api:
+    paths:
+      - "src/api/**"
+    contracts:
+      - "src/api/contracts/**"
+    consumers:
+      - "web"
+      - "worker"
+escalation:
+  targets:
+    - "slack://eng-alerts"
+  acknowledge_sla_minutes: 15
+  resolve_sla_minutes: 120
+policies:
+  pr_scope:
+    enabled: true
+    max_files: 40
+    max_changes: 1500
+    mode: "block"
+    require_plan_for_agent_prs: true
+  duplicate_logic:
+    enabled: true
+    mode: "warn"
+  cross_repo_impact:
+    enabled: true
+    mode: "block"`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.services.api.contracts).toEqual(["src/api/contracts/**"]);
+    expect(config!.services.api.consumers).toEqual(["web", "worker"]);
+    expect(config!.escalation.targets).toEqual(["slack://eng-alerts"]);
+    expect(config!.escalation.acknowledge_sla_minutes).toBe(15);
+    expect(config!.policies.pr_scope.max_files).toBe(40);
+    expect(config!.policies.pr_scope.mode).toBe("block");
+    expect(config!.policies.cross_repo_impact.mode).toBe("block");
   });
 });
 

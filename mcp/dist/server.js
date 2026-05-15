@@ -11,6 +11,131 @@ const SUPABASE_TIMEOUT_MS = 10_000;
 function jsonResult(data) {
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
+function classifyProvenanceSignals(signals) {
+    const text = signals.join(" ").toLowerCase();
+    const candidates = {
+        human: 0.55,
+        dependabot: 0,
+        copilot: 0,
+        codex: 0,
+        claude: 0,
+        "custom-bot": 0,
+        unknown: 0.25,
+    };
+    if (/\[bot\]/.test(text))
+        candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.8);
+    if (/dependabot/.test(text))
+        candidates.dependabot = 0.99;
+    if (/copilot/.test(text))
+        candidates.copilot = Math.max(candidates.copilot, 0.93);
+    if (/\bclaude\b|anthropic/.test(text))
+        candidates.claude = Math.max(candidates.claude, 0.92);
+    if (/\bcodex\b|\bopenai\b/.test(text))
+        candidates.codex = Math.max(candidates.codex, 0.9);
+    if (/^cursor\/| cursor\//.test(text))
+        candidates.codex = Math.max(candidates.codex, 0.82);
+    if (/^agent\/| agent\//.test(text)) {
+        candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.86);
+    }
+    let bestType = "unknown";
+    let bestConfidence = 0;
+    for (const [type, confidence] of Object.entries(candidates)) {
+        if (confidence > bestConfidence) {
+            bestType = type;
+            bestConfidence = confidence;
+        }
+    }
+    return {
+        type: bestType,
+        confidence: Math.round(bestConfidence * 100) / 100,
+    };
+}
+function detectCiIntegrity(files) {
+    const blockingPatterns = [];
+    const warningSignals = [];
+    let score = 0;
+    for (const file of files.filter((f) => f.filename.startsWith(".github/workflows/"))) {
+        const patch = file.patch ?? "";
+        if (/\|\|\s*true/.test(patch)) {
+            blockingPatterns.push(`${file.filename}: workflow bypass pattern "|| true"`);
+            score += 45;
+        }
+        if (/^\+\s*continue-on-error:\s*true\b/m.test(patch)) {
+            blockingPatterns.push(`${file.filename}: introduced "continue-on-error: true"`);
+            score += 45;
+        }
+        if (/^\+\s*if:\s*\$\{\{\s*always\(\)\s*\}\}/m.test(patch)) {
+            warningSignals.push(`${file.filename}: always() condition added to workflow gate`);
+            score += 20;
+        }
+    }
+    for (const file of files.filter((f) => /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/.test(f.filename))) {
+        const additions = file.additions ?? 0;
+        const deletions = file.deletions ?? 0;
+        if (deletions > additions * 2 && deletions >= 10) {
+            warningSignals.push(`${file.filename}: heavy test deletion (${deletions} deleted / ${additions} added)`);
+            score += 25;
+        }
+    }
+    return {
+        score: Math.min(100, score),
+        blockingPatterns,
+        warningSignals,
+    };
+}
+function detectSupplyChain(files) {
+    const blockingPatterns = [];
+    const warnings = [];
+    let score = 0;
+    let criticalVulnDetected = false;
+    for (const file of files.filter((f) => /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|poetry\.lock|Pipfile|Pipfile\.lock)$/.test(f.filename))) {
+        const patch = file.patch ?? "";
+        if (!patch)
+            continue;
+        const newPackageLines = patch.match(/^\+\s*"(@?[\w.-]+)"\s*:\s*"[^"]+"/gm) ?? [];
+        if (newPackageLines.length > 0) {
+            score += Math.min(25, newPackageLines.length * 5);
+            warnings.push(`${file.filename}: ${newPackageLines.length} new dependency declaration(s)`);
+        }
+        const majorBumpRegex = /^\-\s*"(@?[\w.-]+)"\s*:\s*"\^?(\d+)\.[^"]*"\n\+\s*"\1"\s*:\s*"\^?(\d+)\./gm;
+        for (const match of patch.matchAll(majorBumpRegex)) {
+            const prevMajor = Number(match[2]);
+            const nextMajor = Number(match[3]);
+            if (nextMajor > prevMajor) {
+                score += 15;
+                warnings.push(`${file.filename}: major version jump for ${match[1]} (${prevMajor} -> ${nextMajor})`);
+            }
+        }
+        if (/CVE-\d{4}-\d+/i.test(patch) && /(critical|severity:\s*critical)/i.test(patch)) {
+            criticalVulnDetected = true;
+            blockingPatterns.push(`${file.filename}: critical vulnerability marker detected`);
+            score += 50;
+        }
+    }
+    return {
+        score: Math.min(100, score),
+        criticalVulnDetected,
+        blockingPatterns,
+        warnings,
+    };
+}
+async function loadFeedbackRecords() {
+    const fs = await import("node:fs/promises");
+    const path = process.env.TRAILHEAD_FEEDBACK_STORE ?? ".trailhead-feedback.json";
+    try {
+        const raw = await fs.readFile(path, "utf-8");
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+}
+async function saveFeedbackRecords(records) {
+    const fs = await import("node:fs/promises");
+    const path = process.env.TRAILHEAD_FEEDBACK_STORE ?? ".trailhead-feedback.json";
+    await fs.writeFile(path, JSON.stringify(records, null, 2), "utf-8");
+}
 const server = new McpServer({
     name: "trailhead",
     version: "4.1.0",
@@ -179,6 +304,75 @@ server.tool("compute-risk-score", "Compute a deployment risk score for a set of 
     const { score, factors } = computeRiskScore(files);
     const decision = decideGate(score, 100, 70, 55);
     return jsonResult({ score, factors, decision });
+});
+server.tool("detect-provenance", "Classify PR provenance from author, branch, and commit metadata signals.", {
+    author: z.string().optional().describe("Primary PR author login or name"),
+    branch: z.string().optional().describe("PR branch name"),
+    commitAuthors: z
+        .array(z.string())
+        .default([])
+        .describe("Commit author names/emails/logins"),
+    extraSignals: z.array(z.string()).default([]).describe("Additional provenance hints"),
+}, async ({ author, branch, commitAuthors, extraSignals }) => {
+    const signals = [
+        ...(author ? [author] : []),
+        ...(branch ? [branch] : []),
+        ...commitAuthors,
+        ...extraSignals,
+    ].filter(Boolean);
+    if (signals.length === 0) {
+        return jsonResult({
+            provenance: { type: "unknown", confidence: 0.2 },
+            source: "insufficient-signals",
+        });
+    }
+    const classification = classifyProvenanceSignals(signals);
+    return jsonResult({
+        provenance: classification,
+        source: "author/branch/commit-signals",
+        signalsAnalyzed: signals.length,
+    });
+});
+server.tool("check-ci-integrity", "Check CI integrity risks such as workflow bypass patterns and heavy test deletion.", {
+    files: z
+        .array(z.object({
+        filename: z.string(),
+        additions: z.number().int().min(0).optional(),
+        deletions: z.number().int().min(0).optional(),
+        patch: z.string().optional(),
+    }))
+        .default([]),
+}, async ({ files }) => {
+    const result = detectCiIntegrity(files);
+    return jsonResult({
+        factor: {
+            type: "ci_integrity",
+            score: result.score,
+        },
+        blockingPatterns: result.blockingPatterns,
+        warningSignals: result.warningSignals,
+        shouldBlock: result.blockingPatterns.length > 0,
+    });
+});
+server.tool("check-supply-chain", "Evaluate dependency diffs for supply-chain risks (new packages, major bumps, critical markers).", {
+    files: z
+        .array(z.object({
+        filename: z.string(),
+        patch: z.string().optional(),
+    }))
+        .default([]),
+}, async ({ files }) => {
+    const result = detectSupplyChain(files);
+    return jsonResult({
+        factor: {
+            type: "supply_chain",
+            score: result.score,
+        },
+        criticalVulnDetected: result.criticalVulnDetected,
+        blockingPatterns: result.blockingPatterns,
+        warnings: result.warnings,
+        shouldBlock: result.criticalVulnDetected || result.blockingPatterns.length > 0,
+    });
 });
 server.tool("evaluate-deployment", "Run a full Trailhead evaluation including health checks and risk scoring. Provide the target URLs and file changes.", {
     healthUrls: z
@@ -762,6 +956,220 @@ server.tool("suggest-deploy-timing", "Check if now is a safe time to deploy, con
             : "Consider waiting until conditions improve.",
     });
 });
+server.tool("query-overrides", "Query governed override records from TRAILHEAD_OVERRIDES_JSON (JSON array path) or TRAILHEAD_OVERRIDES_INLINE.", {
+    repo: z.string().optional().describe("Filter by repository id"),
+    environment: z.string().optional().describe("Filter by environment"),
+    from: z.string().optional().describe("Filter records on/after this ISO timestamp"),
+    to: z.string().optional().describe("Filter records on/before this ISO timestamp"),
+}, async ({ repo, environment, from, to }) => {
+    const fs = await import("node:fs/promises");
+    const sourcePath = process.env.TRAILHEAD_OVERRIDES_JSON;
+    const inline = process.env.TRAILHEAD_OVERRIDES_INLINE;
+    let records = [];
+    try {
+        if (sourcePath) {
+            const raw = await fs.readFile(sourcePath, "utf-8");
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed))
+                records = parsed;
+        }
+        else if (inline) {
+            const parsed = JSON.parse(inline);
+            if (Array.isArray(parsed))
+                records = parsed;
+        }
+        else {
+            return jsonResult({
+                error: "No override source configured. Set TRAILHEAD_OVERRIDES_JSON or TRAILHEAD_OVERRIDES_INLINE.",
+            });
+        }
+    }
+    catch (error) {
+        return jsonResult({ error: `Failed to load override records: ${String(error)}` });
+    }
+    const fromMs = from ? Date.parse(from) : undefined;
+    const toMs = to ? Date.parse(to) : undefined;
+    const filtered = records.filter((r) => {
+        const repoMatch = !repo || r["repoId"] === repo || r["repo"] === repo;
+        const envMatch = !environment || r["environment"] === environment;
+        const tsRaw = (r["appliedAt"] ?? r["createdAt"] ?? r["timestamp"]);
+        const ts = tsRaw ? Date.parse(tsRaw) : undefined;
+        const fromMatch = fromMs === undefined || (ts !== undefined && !Number.isNaN(ts) && ts >= fromMs);
+        const toMatch = toMs === undefined || (ts !== undefined && !Number.isNaN(ts) && ts <= toMs);
+        return repoMatch && envMatch && fromMatch && toMatch;
+    });
+    return jsonResult({
+        total: filtered.length,
+        records: filtered,
+    });
+});
+server.tool("get-escalation-status", "Evaluate escalation SLA status for a blocked PR or deployment incident.", {
+    blockedAt: z.string().describe("ISO timestamp when block started"),
+    acknowledgedAt: z
+        .string()
+        .optional()
+        .describe("ISO timestamp of first acknowledgement"),
+    resolvedAt: z.string().optional().describe("ISO timestamp of resolution"),
+    acknowledgeSlaMinutes: z.number().int().min(1).default(30),
+    resolveSlaMinutes: z.number().int().min(1).default(240),
+    now: z.string().optional().describe("Optional ISO timestamp override for evaluation"),
+}, async ({ blockedAt, acknowledgedAt, resolvedAt, acknowledgeSlaMinutes, resolveSlaMinutes, now, }) => {
+    const blockedMs = Date.parse(blockedAt);
+    if (Number.isNaN(blockedMs)) {
+        return jsonResult({ error: "blockedAt must be a valid ISO timestamp" });
+    }
+    const nowMs = now ? Date.parse(now) : Date.now();
+    if (Number.isNaN(nowMs)) {
+        return jsonResult({ error: "now must be a valid ISO timestamp when provided" });
+    }
+    const ackMs = acknowledgedAt ? Date.parse(acknowledgedAt) : undefined;
+    const resolvedMs = resolvedAt ? Date.parse(resolvedAt) : undefined;
+    const ackDeadline = blockedMs + acknowledgeSlaMinutes * 60 * 1000;
+    const resolveDeadline = blockedMs + resolveSlaMinutes * 60 * 1000;
+    const ackOverdue = ackMs ? ackMs > ackDeadline : nowMs > ackDeadline;
+    const resolveOverdue = resolvedMs
+        ? resolvedMs > resolveDeadline
+        : nowMs > resolveDeadline;
+    const status = resolvedMs ? "resolved" : ackMs ? "acknowledged" : "unacknowledged";
+    return jsonResult({
+        status,
+        blockedAt,
+        acknowledgedAt: acknowledgedAt ?? null,
+        resolvedAt: resolvedAt ?? null,
+        acknowledgeSlaMinutes,
+        resolveSlaMinutes,
+        acknowledgeOverdue: ackOverdue,
+        resolveOverdue: resolveOverdue,
+        overall: ackOverdue || resolveOverdue ? "breached" : "within_sla",
+    });
+});
+server.tool("record-finding-feedback", "Record detector feedback for false-positive tuning and trust calibration.", {
+    detector: z.string().describe("Detector key (e.g. ci_integrity, supply_chain)"),
+    disposition: z
+        .enum(["false_positive", "true_positive", "dismissed"])
+        .describe("Outcome classification"),
+    repo: z.string().optional().describe("Optional repository id"),
+    reason: z.string().optional().describe("Optional freeform reason"),
+}, async ({ detector, disposition, repo, reason }) => {
+    const records = await loadFeedbackRecords();
+    records.push({
+        detector,
+        repo,
+        disposition,
+        reason,
+        timestamp: new Date().toISOString(),
+    });
+    await saveFeedbackRecords(records);
+    return jsonResult({
+        stored: true,
+        totalRecords: records.length,
+        detector,
+        disposition,
+    });
+});
+server.tool("get-detector-noise", "Aggregate detector feedback and return false-positive rates by detector.", {
+    repo: z.string().optional().describe("Optional repository id filter"),
+}, async ({ repo }) => {
+    const records = await loadFeedbackRecords();
+    const filtered = repo ? records.filter((r) => r.repo === repo) : records;
+    const byDetector = new Map();
+    for (const record of filtered) {
+        const entry = byDetector.get(record.detector) ?? {
+            total: 0,
+            falsePositive: 0,
+            truePositive: 0,
+            dismissed: 0,
+        };
+        entry.total += 1;
+        if (record.disposition === "false_positive")
+            entry.falsePositive += 1;
+        if (record.disposition === "true_positive")
+            entry.truePositive += 1;
+        if (record.disposition === "dismissed")
+            entry.dismissed += 1;
+        byDetector.set(record.detector, entry);
+    }
+    const summary = [...byDetector.entries()].map(([detector, entry]) => ({
+        detector,
+        ...entry,
+        falsePositiveRate: entry.total > 0 ? Math.round((entry.falsePositive / entry.total) * 1000) / 10 : 0,
+    }));
+    return jsonResult({
+        repo: repo ?? null,
+        recordsAnalyzed: filtered.length,
+        detectors: summary.sort((a, b) => b.falsePositiveRate - a.falsePositiveRate),
+    });
+});
+server.tool("recommend-policy-tuning", "Propose detector threshold/policy tuning from observed feedback noise.", {
+    repo: z.string().optional().describe("Optional repository id filter"),
+    falsePositiveThreshold: z.number().min(0).max(100).default(15),
+}, async ({ repo, falsePositiveThreshold }) => {
+    const records = await loadFeedbackRecords();
+    const filtered = repo ? records.filter((r) => r.repo === repo) : records;
+    const detectorStats = new Map();
+    for (const record of filtered) {
+        const entry = detectorStats.get(record.detector) ?? { total: 0, falsePositive: 0 };
+        entry.total += 1;
+        if (record.disposition === "false_positive")
+            entry.falsePositive += 1;
+        detectorStats.set(record.detector, entry);
+    }
+    const recommendations = [...detectorStats.entries()]
+        .map(([detector, stat]) => ({
+        detector,
+        samples: stat.total,
+        falsePositiveRate: stat.total > 0 ? Math.round((stat.falsePositive / stat.total) * 1000) / 10 : 0,
+    }))
+        .filter((s) => s.falsePositiveRate > falsePositiveThreshold)
+        .map((s) => ({
+        detector: s.detector,
+        recommendation: `Reduce sensitivity or switch ${s.detector} to warn mode for this repo`,
+        expectedImpact: "Lower review noise while preserving detector visibility",
+        confidence: s.samples >= 20 ? "high" : s.samples >= 8 ? "medium" : "low",
+        falsePositiveRate: s.falsePositiveRate,
+    }));
+    return jsonResult({
+        repo: repo ?? null,
+        falsePositiveThreshold,
+        recommendations,
+        generatedAt: new Date().toISOString(),
+    });
+});
+server.tool("recommend-rollback", "Recommend rollback action based on canary failure and PR provenance.", {
+    provenanceType: z
+        .enum([
+        "human",
+        "dependabot",
+        "copilot",
+        "codex",
+        "claude",
+        "custom-bot",
+        "unknown",
+    ])
+        .describe("Detected provenance for the merged change"),
+    canaryFailed: z.boolean().describe("Whether canary/post-merge health checks failed"),
+    mode: z.enum(["off", "proposal", "auto"]).default("proposal"),
+}, async ({ provenanceType, canaryFailed, mode }) => {
+    if (!canaryFailed || mode === "off") {
+        return jsonResult({
+            action: "none",
+            reason: "No failure signal or rollback mode disabled",
+        });
+    }
+    const isAgent = provenanceType !== "human";
+    if (!isAgent) {
+        return jsonResult({
+            action: "manual-review",
+            reason: "Rollback automation restricted to non-human provenance by default",
+        });
+    }
+    return jsonResult({
+        action: mode === "auto" ? "open-revert-pr" : "propose-revert-pr",
+        reason: "Canary failure correlated with automated provenance merge",
+        provenanceType,
+        mode,
+    });
+});
 // ---------------------------------------------------------------------------
 // Health Resource — trailhead://health (DG9: cached aggregate health)
 // ---------------------------------------------------------------------------
@@ -820,6 +1228,9 @@ server.resource("server-card", "trailhead://server-card", { mimeType: "applicati
                     "check-vercel-health",
                     "check-supabase-health",
                     "compute-risk-score",
+                    "detect-provenance",
+                    "check-ci-integrity",
+                    "check-supply-chain",
                     "evaluate-deployment",
                     "get-dora-metrics",
                     "compare-risk-history",
@@ -828,6 +1239,12 @@ server.resource("server-card", "trailhead://server-card", { mimeType: "applicati
                     "get-security-alerts",
                     "get-deployment-status",
                     "suggest-deploy-timing",
+                    "query-overrides",
+                    "get-escalation-status",
+                    "record-finding-feedback",
+                    "get-detector-noise",
+                    "recommend-policy-tuning",
+                    "recommend-rollback",
                 ],
                 resources: ["trailhead://health", "trailhead://server-card"],
                 adapters: ["vercel", "supabase", "aws-ecs", "fly-io", "cloudflare"],

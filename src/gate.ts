@@ -7,6 +7,7 @@ import type {
   GateDecision,
   GateEvaluation,
   HealthCheckResult,
+  PrProvenance,
   RepoConfig,
   RiskFactor,
 } from "./types.js";
@@ -17,6 +18,7 @@ import {
   detectDependencyChanges,
   decideGate,
   isSensitiveFile,
+  matchesGlobs,
   sensitivityWeight as sensitivityWeightShared,
   isInFreezeWindow,
   type FileInfo,
@@ -49,6 +51,7 @@ interface PrFileInfo {
   additions: number;
   deletions: number;
   changes: number;
+  patch?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +82,7 @@ async function fetchPrFilesFromApi(
     additions: f.additions,
     deletions: f.deletions,
     changes: f.changes,
+    patch: f.patch,
   }));
 }
 
@@ -116,6 +120,7 @@ async function fetchPrFilesFromCommits(
           additions: f.additions ?? 0,
           deletions: f.deletions ?? 0,
           changes: f.changes ?? 0,
+          patch: undefined,
         });
       }
     }
@@ -303,6 +308,758 @@ async function computePrAge(prNumber: number, token: string): Promise<RiskFactor
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// PR provenance detection
+// ---------------------------------------------------------------------------
+
+function classifyFromSignals(signals: string[]): PrProvenance {
+  const text = signals.join(" ").toLowerCase();
+  const candidates: Record<PrProvenance["type"], number> = {
+    human: 0.55,
+    dependabot: 0,
+    copilot: 0,
+    codex: 0,
+    claude: 0,
+    "custom-bot": 0,
+    unknown: 0.25,
+  };
+
+  if (/\[bot\]/.test(text))
+    candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.8);
+  if (/dependabot/.test(text)) candidates.dependabot = 0.99;
+  if (/copilot/.test(text)) candidates.copilot = Math.max(candidates.copilot, 0.93);
+  if (/\bclaude\b|anthropic/.test(text))
+    candidates.claude = Math.max(candidates.claude, 0.92);
+  if (/\bcodex\b|\bopenai\b/.test(text))
+    candidates.codex = Math.max(candidates.codex, 0.9);
+  if (/^cursor\/| cursor\//.test(text))
+    candidates.codex = Math.max(candidates.codex, 0.82);
+  if (/^agent\/| agent\//.test(text)) {
+    candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.86);
+  }
+
+  if (candidates["custom-bot"] >= 0.8) {
+    candidates.human = Math.min(candidates.human, 0.2);
+  }
+
+  let bestType: PrProvenance["type"] = "unknown";
+  let bestConfidence = 0;
+  for (const [type, confidence] of Object.entries(candidates) as Array<
+    [PrProvenance["type"], number]
+  >) {
+    if (confidence > bestConfidence) {
+      bestType = type;
+      bestConfidence = confidence;
+    }
+  }
+
+  return {
+    type: bestType,
+    confidence: Math.round(bestConfidence * 100) / 100,
+    source: "author/branch/commit-signals",
+  };
+}
+
+async function detectPrProvenance(
+  prNumber: number,
+  token: string,
+): Promise<PrProvenance | null> {
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+
+    const [{ data: pr }, { data: commits }] = await Promise.all([
+      octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: prNumber,
+      }),
+      octokit.rest.pulls.listCommits({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 50,
+      }),
+    ]);
+
+    const signals: string[] = [];
+    if (pr.user?.login) signals.push(pr.user.login);
+    if (pr.head?.ref) signals.push(pr.head.ref);
+    for (const commit of commits) {
+      if (commit.author?.login) signals.push(commit.author.login);
+      if (commit.commit?.author?.name) signals.push(commit.commit.author.name);
+      if (commit.commit?.author?.email) signals.push(commit.commit.author.email);
+      if (commit.committer?.login) signals.push(commit.committer.login);
+    }
+
+    if (signals.length === 0) {
+      return { type: "unknown", confidence: 0.2, source: "insufficient-signals" };
+    }
+
+    return classifyFromSignals(signals);
+  } catch (error) {
+    core.debug(`Failed to detect PR provenance: ${error}`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CI integrity detection
+// ---------------------------------------------------------------------------
+
+interface CiIntegrityDetection {
+  factor: RiskFactor | null;
+  blockingPatterns: string[];
+}
+
+function detectCiIntegrityRisk(files: PrFileInfo[]): CiIntegrityDetection {
+  const blockingPatterns: string[] = [];
+  const warningSignals: string[] = [];
+  let score = 0;
+
+  const workflowFiles = files.filter((f) => f.filename.startsWith(".github/workflows/"));
+  const testFiles = files.filter((f) =>
+    /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/.test(f.filename),
+  );
+
+  for (const file of workflowFiles) {
+    const patch = file.patch ?? "";
+    if (/\|\|\s*true/.test(patch)) {
+      blockingPatterns.push(`${file.filename}: workflow bypass pattern "|| true"`);
+      score += 45;
+    }
+    if (/^\+\s*continue-on-error:\s*true\b/m.test(patch)) {
+      blockingPatterns.push(`${file.filename}: introduced "continue-on-error: true"`);
+      score += 45;
+    }
+    if (/^\+\s*if:\s*\$\{\{\s*always\(\)\s*\}\}/m.test(patch)) {
+      warningSignals.push(`${file.filename}: always() condition added to workflow gate`);
+      score += 20;
+    }
+  }
+
+  for (const file of testFiles) {
+    if (file.deletions > file.additions * 2 && file.deletions >= 10) {
+      warningSignals.push(
+        `${file.filename}: heavy test deletion (${file.deletions} deleted / ${file.additions} added)`,
+      );
+      score += 25;
+    }
+  }
+
+  for (const file of files) {
+    const patch = file.patch ?? "";
+    if (!patch) continue;
+    if (
+      /^-\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch) &&
+      /^\+\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch)
+    ) {
+      warningSignals.push(`${file.filename}: coverage threshold definition changed`);
+      score += 20;
+    }
+  }
+
+  if (score === 0) {
+    return { factor: null, blockingPatterns: [] };
+  }
+
+  const factor: RiskFactor = {
+    type: "ci_integrity",
+    score: Math.min(100, score),
+    detail: {
+      blockingPatterns,
+      warningSignals,
+      description: "CI confidence and workflow integrity signals",
+    },
+  };
+
+  return { factor, blockingPatterns };
+}
+
+// ---------------------------------------------------------------------------
+// Workflow security linting
+// ---------------------------------------------------------------------------
+
+interface WorkflowSecurityDetection {
+  factor: RiskFactor | null;
+  blockingPatterns: string[];
+  warnings: string[];
+}
+
+function detectWorkflowSecurityRisk(
+  files: PrFileInfo[],
+  allowUnpinnedActions: string[],
+): WorkflowSecurityDetection {
+  const blockingPatterns: string[] = [];
+  const warnings: string[] = [];
+  let score = 0;
+
+  const workflowFiles = files.filter((f) => f.filename.startsWith(".github/workflows/"));
+
+  for (const file of workflowFiles) {
+    const patch = file.patch ?? "";
+    if (!patch) continue;
+
+    if (/^\+\s*permissions:\s*write-all\b/m.test(patch)) {
+      blockingPatterns.push(
+        `${file.filename}: introduced over-privileged permissions write-all`,
+      );
+      score += 55;
+    }
+
+    const actionRefMatches = patch.matchAll(
+      /^\+\s*uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@([^\s#]+)\s*$/gm,
+    );
+    for (const match of actionRefMatches) {
+      const action = match[1];
+      const ref = match[2];
+      const isPinnedSha = /^[a-f0-9]{40}$/i.test(ref);
+      const allowListed = allowUnpinnedActions.includes(action);
+      if (!isPinnedSha && !allowListed) {
+        warnings.push(`${file.filename}: unpinned third-party action ${action}@${ref}`);
+        score += 20;
+      }
+    }
+
+    if (/^\+\s*run:\s*.*\$\{\{\s*github\.event\.[^}]+\}\}/m.test(patch)) {
+      warnings.push(
+        `${file.filename}: untrusted event data interpolated into shell run step`,
+      );
+      score += 25;
+    }
+  }
+
+  if (score === 0) {
+    return { factor: null, blockingPatterns: [], warnings: [] };
+  }
+
+  return {
+    factor: {
+      type: "workflow_security",
+      score: Math.min(100, score),
+      detail: {
+        blockingPatterns,
+        warnings,
+        description: "Workflow security lint signals",
+      },
+    },
+    blockingPatterns,
+    warnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Prompt/command injection detection
+// ---------------------------------------------------------------------------
+
+interface PromptInjectionDetection {
+  factor: RiskFactor | null;
+  blockingPatterns: string[];
+  warnings: string[];
+}
+
+function detectPromptInjectionRisk(files: PrFileInfo[]): PromptInjectionDetection {
+  const blockingPatterns: string[] = [];
+  const warnings: string[] = [];
+  let score = 0;
+
+  for (const file of files) {
+    const patch = file.patch ?? "";
+    if (!patch) continue;
+
+    if (
+      /^\+\s*.*(exec|spawn|execa)\([^)]*(req\.(body|query|params)|context\.payload|userInput)/m.test(
+        patch,
+      )
+    ) {
+      blockingPatterns.push(
+        `${file.filename}: untrusted input appears to flow into command execution`,
+      );
+      score += 60;
+    }
+
+    if (
+      /^\+\s*.*(callLLM|sendMessage|generateContent)\([^)]*(req\.(body|query|params)|userInput)/m.test(
+        patch,
+      ) &&
+      !/sanitizeForPrompt\(/.test(patch)
+    ) {
+      blockingPatterns.push(
+        `${file.filename}: untrusted input used in prompt call without sanitizeForPrompt()`,
+      );
+      score += 60;
+    }
+
+    if (
+      /^\+\s*.*(callLLM|sendMessage|generateContent)\(/m.test(patch) &&
+      !/sanitizeForPrompt\(/.test(patch)
+    ) {
+      warnings.push(
+        `${file.filename}: prompt call added; verify sanitization and escaping`,
+      );
+      score += 20;
+    }
+  }
+
+  if (score === 0) {
+    return { factor: null, blockingPatterns: [], warnings: [] };
+  }
+
+  return {
+    factor: {
+      type: "prompt_injection_risk",
+      score: Math.min(100, score),
+      detail: {
+        blockingPatterns,
+        warnings,
+        description: "Prompt/command injection risk signals",
+      },
+    },
+    blockingPatterns,
+    warnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Supply-chain risk detection
+// ---------------------------------------------------------------------------
+
+interface SupplyChainDetection {
+  factor: RiskFactor | null;
+  blockingPatterns: string[];
+  warnings: string[];
+  criticalVulnDetected: boolean;
+}
+
+function detectSupplyChainRisk(files: PrFileInfo[]): SupplyChainDetection {
+  const blockingPatterns: string[] = [];
+  const warnings: string[] = [];
+  let score = 0;
+  let criticalVulnDetected = false;
+
+  const dependencyFiles = files.filter((f) =>
+    /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|poetry\.lock|Pipfile|Pipfile\.lock)$/.test(
+      f.filename,
+    ),
+  );
+
+  for (const file of dependencyFiles) {
+    const patch = file.patch ?? "";
+    if (!patch) continue;
+
+    const newPackageLines = patch.match(/^\+\s*"(@?[\w.-]+)"\s*:\s*"[^"]+"/gm) ?? [];
+    if (newPackageLines.length > 0) {
+      score += Math.min(25, newPackageLines.length * 5);
+      warnings.push(
+        `${file.filename}: ${newPackageLines.length} new dependency declaration(s) added`,
+      );
+    }
+
+    const majorBumpRegex =
+      /^-\s*"(@?[\w.-]+)"\s*:\s*"\^?(\d+)\.[^"]*"\n\+\s*"\1"\s*:\s*"\^?(\d+)\./gm;
+    for (const match of patch.matchAll(majorBumpRegex)) {
+      const prevMajor = Number(match[2]);
+      const nextMajor = Number(match[3]);
+      if (nextMajor > prevMajor) {
+        score += 15;
+        warnings.push(
+          `${file.filename}: major version jump detected for ${match[1]} (${prevMajor} -> ${nextMajor})`,
+        );
+      }
+    }
+
+    if (/^\+\s*"?(@?[\w.-]+)-\1"?\s*:/m.test(patch)) {
+      warnings.push(
+        `${file.filename}: suspicious repeated package token (possible typosquat)`,
+      );
+      score += 20;
+    }
+
+    if (/CVE-\d{4}-\d+/i.test(patch) && /(critical|severity:\s*critical)/i.test(patch)) {
+      criticalVulnDetected = true;
+      blockingPatterns.push(
+        `${file.filename}: critical vulnerability marker detected in diff`,
+      );
+      score += 50;
+    }
+  }
+
+  if (score === 0) {
+    return {
+      factor: null,
+      blockingPatterns: [],
+      warnings: [],
+      criticalVulnDetected: false,
+    };
+  }
+
+  return {
+    factor: {
+      type: "supply_chain",
+      score: Math.min(100, score),
+      detail: {
+        blockingPatterns,
+        warnings,
+        criticalVulnDetected,
+        description: "Supply chain risk signals from dependency changes",
+      },
+    },
+    blockingPatterns,
+    warnings,
+    criticalVulnDetected,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PR scope, duplicate logic, and cross-repo impact
+// ---------------------------------------------------------------------------
+
+interface PrScopeDetection {
+  factor: RiskFactor | null;
+  findings: string[];
+  forceBlock: boolean;
+}
+
+async function detectPrScopeRisk(params: {
+  files: PrFileInfo[];
+  repoConfig: RepoConfig | null;
+  prNumber?: number;
+  token?: string;
+  provenance: PrProvenance | null;
+}): Promise<PrScopeDetection> {
+  const cfg = params.repoConfig?.policies?.pr_scope;
+  if (!cfg?.enabled) return { factor: null, findings: [], forceBlock: false };
+
+  const fileCount = params.files.length;
+  const totalChanges = params.files.reduce((sum, f) => sum + f.changes, 0);
+  const findings: string[] = [];
+  let score = 0;
+
+  if (fileCount > cfg.max_files) {
+    findings.push(`PR scope exceeds max_files (${fileCount} > ${cfg.max_files}).`);
+    score += 45;
+  }
+  if (totalChanges > cfg.max_changes) {
+    findings.push(`PR scope exceeds max_changes (${totalChanges} > ${cfg.max_changes}).`);
+    score += 45;
+  }
+
+  if (
+    cfg.require_plan_for_agent_prs &&
+    params.prNumber &&
+    params.token &&
+    params.provenance &&
+    params.provenance.type !== "human"
+  ) {
+    try {
+      const octokit = github.getOctokit(params.token);
+      const { owner, repo } = github.context.repo;
+      const { data: pr } = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: params.prNumber,
+      });
+      const body = (pr.body ?? "").trim();
+      const hasPlan =
+        /##\s*plan/i.test(body) ||
+        /###\s*plan/i.test(body) ||
+        /- \[[ xX]\].*test/i.test(body);
+      if (!hasPlan) {
+        findings.push(
+          "Agent PR plan required but PR body lacks a plan/test checklist section.",
+        );
+        score += 30;
+      }
+    } catch (error) {
+      core.debug(`PR scope plan check failed: ${error}`);
+    }
+  }
+
+  if (score === 0) {
+    return { factor: null, findings: [], forceBlock: false };
+  }
+
+  return {
+    factor: {
+      type: "pr_scope",
+      score: Math.min(100, score),
+      detail: {
+        fileCount,
+        totalChanges,
+        findings,
+        description: "PR size/scope and decomposition risk",
+      },
+    },
+    findings,
+    forceBlock: cfg.mode === "block",
+  };
+}
+
+interface DuplicateLogicDetection {
+  factor: RiskFactor | null;
+  findings: string[];
+}
+
+function detectDuplicateLogicRisk(files: PrFileInfo[]): DuplicateLogicDetection {
+  const helperFiles = files.filter((f) =>
+    /(?:^|\/)(?:utils?|helpers?|validators?)\/|(?:^|\/)(?:util|helper|validator)\./i.test(
+      f.filename,
+    ),
+  );
+  const basenameMap = new Map<string, string[]>();
+  for (const file of helperFiles) {
+    const normalized = file.filename.replace(/\\/g, "/");
+    const base = normalized.split("/").pop() ?? normalized;
+    basenameMap.set(base, [...(basenameMap.get(base) ?? []), normalized]);
+  }
+
+  const duplicates = [...basenameMap.entries()].filter(([, paths]) => paths.length > 1);
+  if (duplicates.length === 0) return { factor: null, findings: [] };
+
+  const findings = duplicates.map(
+    ([base, paths]) =>
+      `Potential duplicate helper logic for ${base}: ${paths.slice(0, 3).join(", ")}${paths.length > 3 ? "..." : ""}`,
+  );
+  const score = Math.min(100, duplicates.length * 25);
+  return {
+    factor: {
+      type: "duplicate_logic",
+      score,
+      detail: {
+        duplicates: findings,
+        description: "Potential duplicate helper/utility additions",
+      },
+    },
+    findings,
+  };
+}
+
+interface CrossRepoImpactDetection {
+  factor: RiskFactor | null;
+  findings: string[];
+  affectedConsumers: string[];
+}
+
+function detectCrossRepoImpact(
+  files: PrFileInfo[],
+  repoConfig: RepoConfig | null,
+): CrossRepoImpactDetection {
+  const cfg = repoConfig?.policies?.cross_repo_impact;
+  if (!cfg?.enabled) return { factor: null, findings: [], affectedConsumers: [] };
+
+  const affectedConsumers = new Set<string>();
+  const findings: string[] = [];
+
+  for (const [serviceName, service] of Object.entries(repoConfig?.services ?? {})) {
+    const contractPatterns = service.contracts ?? [];
+    if (contractPatterns.length === 0) continue;
+
+    const touchedContracts = files
+      .filter((f) => matchesGlobs(f.filename, contractPatterns))
+      .map((f) => f.filename);
+    if (touchedContracts.length === 0) continue;
+
+    for (const consumer of service.consumers ?? []) {
+      affectedConsumers.add(consumer);
+    }
+    findings.push(
+      `Contract surface changed for service "${serviceName}" (${touchedContracts.length} file(s)).`,
+    );
+  }
+
+  if (findings.length === 0) {
+    return { factor: null, findings: [], affectedConsumers: [] };
+  }
+
+  return {
+    factor: {
+      type: "cross_repo_impact",
+      score: Math.min(100, 30 + affectedConsumers.size * 15),
+      detail: {
+        findings,
+        affectedConsumers: [...affectedConsumers],
+        description: "Potential downstream consumer impact from contract changes",
+      },
+    },
+    findings,
+    affectedConsumers: [...affectedConsumers],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Session correlation (rapid-fire merge burst)
+// ---------------------------------------------------------------------------
+
+interface SessionCorrelationResult {
+  burstCount: number;
+  windowMinutes: number;
+}
+
+async function detectSessionCorrelation(params: {
+  prNumber?: number;
+  token?: string;
+  provenance: PrProvenance | null;
+  repoConfig: RepoConfig | null;
+}): Promise<SessionCorrelationResult | null> {
+  const cfg = params.repoConfig?.policies?.session_correlation;
+  if (!cfg?.enabled || !params.prNumber || !params.token || !params.provenance)
+    return null;
+  if (params.provenance.type === "human") return null;
+
+  try {
+    const octokit = github.getOctokit(params.token);
+    const { owner, repo } = github.context.repo;
+    const { data: currentPr } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: params.prNumber,
+    });
+    const author = currentPr.user?.login;
+    if (!author) return null;
+
+    const sinceMs = Date.now() - cfg.window_minutes * 60 * 1000;
+    const { data: closedPrs } = await octokit.rest.pulls.list({
+      owner,
+      repo,
+      state: "closed",
+      sort: "updated",
+      direction: "desc",
+      per_page: 100,
+    });
+
+    const mergedInWindow = closedPrs.filter((pr) => {
+      if (!pr.merged_at) return false;
+      if (pr.user?.login !== author) return false;
+      const mergedAt = Date.parse(pr.merged_at);
+      return !Number.isNaN(mergedAt) && mergedAt >= sinceMs;
+    });
+
+    return {
+      burstCount: mergedInWindow.length,
+      windowMinutes: cfg.window_minutes,
+    };
+  } catch (error) {
+    core.debug(`Session correlation detection failed: ${error}`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent PR policy enforcement
+// ---------------------------------------------------------------------------
+
+interface AgentPolicyEnforcementResult {
+  adjustedRiskThreshold?: number;
+  forceBlock: boolean;
+  findings: string[];
+}
+
+function isAgentProvenanceType(type: PrProvenance["type"]): boolean {
+  return type !== "human";
+}
+
+async function enforceAgentPrPolicies(params: {
+  prNumber?: number;
+  token?: string;
+  files: PrFileInfo[];
+  repoConfig: RepoConfig | null;
+  provenance: PrProvenance | null;
+  currentRiskThreshold: number;
+}): Promise<AgentPolicyEnforcementResult | null> {
+  const policy = params.repoConfig?.policies?.agent_prs;
+  if (!policy?.enabled || !params.prNumber || !params.token) return null;
+
+  const provenanceType = params.provenance?.type ?? "unknown";
+  const isUnknownStrict =
+    provenanceType === "unknown" && policy.strict_on_unknown_provenance;
+  const shouldTreatAsAgent = isUnknownStrict || isAgentProvenanceType(provenanceType);
+  if (!shouldTreatAsAgent) return null;
+
+  const findings: string[] = [];
+  let adjustedRiskThreshold: number | undefined;
+  let forceBlock = false;
+
+  if (isUnknownStrict) {
+    findings.push(
+      "PR provenance is unknown and strict mode is enabled; applying agent PR policy checks.",
+    );
+  }
+
+  if (
+    policy.risk_threshold !== undefined &&
+    policy.risk_threshold < params.currentRiskThreshold
+  ) {
+    adjustedRiskThreshold = policy.risk_threshold;
+    findings.push(
+      `Agent PR risk threshold tightened from ${params.currentRiskThreshold} to ${policy.risk_threshold}.`,
+    );
+  }
+
+  const sensitivePatterns =
+    policy.sensitive_paths.length > 0
+      ? policy.sensitive_paths
+      : (params.repoConfig?.sensitivity.high ?? []);
+  const touchesSensitivePaths =
+    params.files.some((f) =>
+      sensitivePatterns.length > 0
+        ? matchesGlobs(f.filename, sensitivePatterns)
+        : isSensitiveFile(f.filename),
+    ) || params.files.some((f) => isSensitiveFile(f.filename));
+
+  if (!touchesSensitivePaths) {
+    return { adjustedRiskThreshold, forceBlock, findings };
+  }
+
+  try {
+    const octokit = github.getOctokit(params.token);
+    const { owner, repo } = github.context.repo;
+    const { data: reviews } = await octokit.rest.pulls.listReviews({
+      owner,
+      repo,
+      pull_number: params.prNumber,
+      per_page: 100,
+    });
+
+    const approvedBy = new Set(
+      reviews
+        .filter((r) => r.state === "APPROVED")
+        .map((r) => r.user?.login)
+        .filter((u): u is string => Boolean(u)),
+    );
+
+    if (approvedBy.size < policy.required_approvals) {
+      forceBlock = true;
+      findings.push(
+        `Sensitive-path agent PR requires ${policy.required_approvals} approval(s); found ${approvedBy.size}.`,
+      );
+    }
+
+    if (policy.require_code_owner_approval) {
+      if (policy.code_owner_reviewers.length === 0) {
+        forceBlock = true;
+        findings.push(
+          "Code-owner approval required for sensitive-path agent PRs, but no code_owner_reviewers configured.",
+        );
+      } else {
+        const hasCodeOwnerApproval = policy.code_owner_reviewers.some((r) =>
+          approvedBy.has(r),
+        );
+        if (!hasCodeOwnerApproval) {
+          forceBlock = true;
+          findings.push(
+            `Sensitive-path agent PR requires one code-owner approval (${policy.code_owner_reviewers.join(", ")}).`,
+          );
+        }
+      }
+    }
+  } catch (error) {
+    core.debug(`Agent PR policy review check failed: ${error}`);
+    // Fail-open remains the default: do not force block on API errors.
+  }
+
+  return { adjustedRiskThreshold, forceBlock, findings };
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +1369,7 @@ export async function evaluateGate(
     files,
     authorFactor,
     prAgeFactor,
+    provenance,
     httpHealthChecks,
     vercelCheck,
     supabaseCheck,
@@ -625,6 +1383,9 @@ export async function evaluateGate(
       : Promise.resolve(null),
     prNumber && config.githubToken
       ? computePrAge(prNumber, config.githubToken)
+      : Promise.resolve(null),
+    prNumber && config.githubToken
+      ? detectPrProvenance(prNumber, config.githubToken)
       : Promise.resolve(null),
     config.healthCheckUrls.length > 0
       ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
@@ -646,6 +1407,8 @@ export async function evaluateGate(
     envConfig?.risk ?? repoConfig?.thresholds.risk ?? config.riskThreshold;
   const effectiveWarnThreshold =
     envConfig?.warn ?? repoConfig?.thresholds.warn ?? config.warnThreshold;
+  let adjustedRiskThreshold = effectiveRiskThreshold;
+  const policyFindings: string[] = [];
 
   const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
   if (freezeCheck.frozen) {
@@ -672,10 +1435,116 @@ export async function evaluateGate(
   }
 
   const customWeights = repoConfig?.weights ?? {};
+  const ciIntegrityConfig = repoConfig?.policies?.ci_integrity;
+  const ciIntegrity =
+    ciIntegrityConfig?.enabled === false
+      ? { factor: null, blockingPatterns: [] }
+      : detectCiIntegrityRisk(files);
+  if (ciIntegrity.factor) {
+    riskFactors.push(ciIntegrity.factor);
+  }
+  const workflowSecurityConfig = repoConfig?.policies?.workflow_security;
+  const workflowSecurity =
+    workflowSecurityConfig?.enabled === false
+      ? { factor: null, blockingPatterns: [], warnings: [] }
+      : detectWorkflowSecurityRisk(
+          files,
+          workflowSecurityConfig?.allow_unpinned_actions ?? [],
+        );
+  if (workflowSecurity.factor) {
+    riskFactors.push(workflowSecurity.factor);
+  }
+  const promptInjectionConfig = repoConfig?.policies?.prompt_injection;
+  const promptInjection =
+    promptInjectionConfig?.enabled === false
+      ? { factor: null, blockingPatterns: [], warnings: [] }
+      : detectPromptInjectionRisk(files);
+  if (promptInjection.factor) {
+    riskFactors.push(promptInjection.factor);
+  }
+  const supplyChainConfig = repoConfig?.policies?.supply_chain;
+  const supplyChain =
+    supplyChainConfig?.enabled === false
+      ? {
+          factor: null,
+          blockingPatterns: [],
+          warnings: [],
+          criticalVulnDetected: false,
+        }
+      : detectSupplyChainRisk(files);
+  if (supplyChain.factor) {
+    if (
+      supplyChain.criticalVulnDetected &&
+      supplyChain.factor.score < (supplyChainConfig?.force_score_on_critical ?? 80)
+    ) {
+      supplyChain.factor.score = supplyChainConfig?.force_score_on_critical ?? 80;
+      supplyChain.factor.detail = {
+        ...supplyChain.factor.detail,
+        critical_floor_applied: supplyChain.factor.score,
+      };
+    }
+    riskFactors.push(supplyChain.factor);
+  }
+  const prScope = await detectPrScopeRisk({
+    files,
+    repoConfig,
+    prNumber,
+    token: config.githubToken,
+    provenance,
+  });
+  if (prScope.factor) {
+    riskFactors.push(prScope.factor);
+  }
+  const duplicateLogicConfig = repoConfig?.policies?.duplicate_logic;
+  const duplicateLogic =
+    duplicateLogicConfig?.enabled === false
+      ? { factor: null, findings: [] }
+      : detectDuplicateLogicRisk(files);
+  if (duplicateLogic.factor) {
+    riskFactors.push(duplicateLogic.factor);
+  }
+  const crossRepoImpact = detectCrossRepoImpact(files, repoConfig);
+  if (crossRepoImpact.factor) {
+    riskFactors.push(crossRepoImpact.factor);
+  }
   const riskScore =
     riskFactors.length > 0
       ? weightedAverageScores(riskFactors as RiskFactorResult[], customWeights)
       : localRiskScore;
+
+  const agentPolicy = await enforceAgentPrPolicies({
+    prNumber,
+    token: config.githubToken,
+    files,
+    repoConfig,
+    provenance,
+    currentRiskThreshold: adjustedRiskThreshold,
+  });
+  if (agentPolicy?.adjustedRiskThreshold !== undefined) {
+    adjustedRiskThreshold = agentPolicy.adjustedRiskThreshold;
+  }
+  if (agentPolicy?.findings.length) {
+    policyFindings.push(...agentPolicy.findings);
+  }
+
+  const sessionCorrelation = await detectSessionCorrelation({
+    prNumber,
+    token: config.githubToken,
+    provenance,
+    repoConfig,
+  });
+  const sessionCfg = repoConfig?.policies?.session_correlation;
+  if (sessionCorrelation && sessionCfg) {
+    const threshold = sessionCfg.threshold;
+    if (sessionCorrelation.burstCount >= threshold) {
+      policyFindings.push(
+        `Rapid-fire merge burst detected: ${sessionCorrelation.burstCount} merged PRs in ${sessionCorrelation.windowMinutes} minutes.`,
+      );
+      if (sessionCfg.mode === "block") {
+        policyFindings.push("Session correlation policy is configured to block.");
+      }
+    }
+  }
 
   const healthChecks: HealthCheckResult[] = [...httpHealthChecks];
   if (vercelCheck) healthChecks.push(vercelCheck);
@@ -683,16 +1552,119 @@ export async function evaluateGate(
   if (mcpCheck) healthChecks.push(mcpCheck);
 
   const healthScore = aggregateHealthScore(healthChecks);
-  const gateDecision = freezeCheck.frozen
+  const baselineDecision = freezeCheck.frozen
     ? ("block" as GateDecision)
     : (decideGate(
         riskScore,
         healthScore,
-        effectiveRiskThreshold,
+        adjustedRiskThreshold,
         effectiveWarnThreshold,
       ) as GateDecision);
+  const gateDecision =
+    agentPolicy?.forceBlock === true ||
+    (ciIntegrity.blockingPatterns.length > 0 &&
+      (ciIntegrityConfig?.mode ?? "block") === "block") ||
+    (workflowSecurity.blockingPatterns.length > 0 &&
+      (workflowSecurityConfig?.mode ?? "block") === "block") ||
+    (promptInjection.blockingPatterns.length > 0 &&
+      (promptInjectionConfig?.mode ?? "block") === "block") ||
+    ((supplyChain.blockingPatterns.length > 0 || supplyChain.criticalVulnDetected) &&
+      (supplyChainConfig?.mode ?? "warn") === "block") ||
+    (prScope.forceBlock && prScope.findings.length > 0) ||
+    ((duplicateLogic.factor?.score ?? 0) >= 60 &&
+      (duplicateLogicConfig?.mode ?? "warn") === "block") ||
+    ((crossRepoImpact.factor?.score ?? 0) >= 60 &&
+      (repoConfig?.policies?.cross_repo_impact?.mode ?? "warn") === "block") ||
+    (sessionCorrelation &&
+      sessionCfg &&
+      sessionCorrelation.burstCount >= sessionCfg.threshold &&
+      sessionCfg.mode === "block")
+      ? ("block" as GateDecision)
+      : baselineDecision;
+
+  if (ciIntegrity.blockingPatterns.length > 0) {
+    policyFindings.push(
+      `CI integrity blocking patterns detected (${ciIntegrity.blockingPatterns.length}).`,
+    );
+  }
+  if (workflowSecurity.blockingPatterns.length > 0) {
+    policyFindings.push(
+      `Workflow security blocking patterns detected (${workflowSecurity.blockingPatterns.length}).`,
+    );
+  }
+  if (workflowSecurity.warnings.length > 0) {
+    policyFindings.push(
+      `Workflow security warnings detected (${workflowSecurity.warnings.length}).`,
+    );
+  }
+  if (promptInjection.blockingPatterns.length > 0) {
+    policyFindings.push(
+      `Prompt/command injection blocking patterns detected (${promptInjection.blockingPatterns.length}).`,
+    );
+  }
+  if (promptInjection.warnings.length > 0) {
+    policyFindings.push(
+      `Prompt/command injection warnings detected (${promptInjection.warnings.length}).`,
+    );
+  }
+  if (supplyChain.blockingPatterns.length > 0) {
+    policyFindings.push(
+      `Supply-chain blocking patterns detected (${supplyChain.blockingPatterns.length}).`,
+    );
+  }
+  if (supplyChain.warnings.length > 0) {
+    policyFindings.push(
+      `Supply-chain warnings detected (${supplyChain.warnings.length}).`,
+    );
+  }
+  if (prScope.findings.length > 0) {
+    policyFindings.push(...prScope.findings);
+  }
+  if (duplicateLogic.findings.length > 0) {
+    policyFindings.push(
+      `Potential duplicate logic findings (${duplicateLogic.findings.length}).`,
+    );
+  }
+  if (crossRepoImpact.findings.length > 0) {
+    policyFindings.push(...crossRepoImpact.findings);
+    if (crossRepoImpact.affectedConsumers.length > 0) {
+      policyFindings.push(
+        `Potential downstream impact for: ${crossRepoImpact.affectedConsumers.join(", ")}.`,
+      );
+    }
+  }
 
   const fileNames = files.map((f) => f.filename);
+  const escalationCfg = repoConfig?.escalation;
+  const escalationStatus =
+    gateDecision === "block" && escalationCfg
+      ? {
+          enabled: escalationCfg.targets.length > 0,
+          target_count: escalationCfg.targets.length,
+          acknowledge_sla_minutes: escalationCfg.acknowledge_sla_minutes,
+          resolve_sla_minutes: escalationCfg.resolve_sla_minutes,
+        }
+      : undefined;
+  if (escalationStatus?.enabled) {
+    policyFindings.push(
+      `Escalation configured with ${escalationStatus.target_count} target(s); acknowledge within ${escalationStatus.acknowledge_sla_minutes} minutes.`,
+    );
+  }
+  const trustProfile =
+    provenance?.type && provenance.type !== "human"
+      ? riskScore >= 75
+        ? {
+            strictness: "strict" as const,
+            reason: "Automated provenance with high composite risk score",
+          }
+        : {
+            strictness: "elevated" as const,
+            reason: "Automated provenance with elevated review requirements",
+          }
+      : {
+          strictness: "baseline" as const,
+          reason: "Human provenance or unknown automation signals",
+        };
 
   let localEvaluation: GateEvaluation = {
     id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
@@ -707,6 +1679,27 @@ export async function evaluateGate(
     files: fileNames.length > 0 ? fileNames : undefined,
     evaluationMs: Date.now() - start,
     environment: config.environment,
+    policyFindings: policyFindings.length > 0 ? policyFindings : undefined,
+    pr: prNumber
+      ? {
+          provenance:
+            provenance ??
+            ({
+              type: "unknown",
+              confidence: 0.2,
+              source: "not-detected",
+            } as PrProvenance),
+        }
+      : undefined,
+    session_correlation:
+      sessionCorrelation && sessionCorrelation.burstCount > 0
+        ? {
+            burst_count: sessionCorrelation.burstCount,
+            window: `${sessionCorrelation.windowMinutes}m`,
+          }
+        : undefined,
+    escalation_status: escalationStatus,
+    trust_profile: trustProfile,
   };
 
   if (config.apiKey) {
@@ -1157,6 +2150,65 @@ export function formatGateReport(
 
   if (riskThreshold !== undefined) {
     lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
+  }
+
+  if (evaluation.pr?.provenance) {
+    lines.push(
+      `### PR Provenance`,
+      ``,
+      `- Type: \`${evaluation.pr.provenance.type}\``,
+      `- Confidence: \`${evaluation.pr.provenance.confidence}\``,
+      ...(evaluation.pr.provenance.source
+        ? [`- Source: ${evaluation.pr.provenance.source}`]
+        : []),
+      ``,
+    );
+  }
+
+  if (evaluation.session_correlation) {
+    lines.push(
+      `### Session Correlation`,
+      ``,
+      `- Burst count: \`${evaluation.session_correlation.burst_count}\``,
+      `- Window: \`${evaluation.session_correlation.window}\``,
+      ``,
+    );
+  }
+
+  if (evaluation.trust_profile) {
+    lines.push(
+      `### Trust Profile`,
+      ``,
+      `- Strictness: \`${evaluation.trust_profile.strictness}\``,
+      `- Reason: ${evaluation.trust_profile.reason}`,
+      ``,
+    );
+  }
+
+  if (evaluation.escalation_status) {
+    lines.push(
+      `### Escalation`,
+      ``,
+      `- Enabled: \`${evaluation.escalation_status.enabled}\``,
+      `- Targets: \`${evaluation.escalation_status.target_count}\``,
+      ...(evaluation.escalation_status.acknowledge_sla_minutes
+        ? [
+            `- Acknowledge SLA: \`${evaluation.escalation_status.acknowledge_sla_minutes}m\``,
+          ]
+        : []),
+      ...(evaluation.escalation_status.resolve_sla_minutes
+        ? [`- Resolve SLA: \`${evaluation.escalation_status.resolve_sla_minutes}m\``]
+        : []),
+      ``,
+    );
+  }
+
+  if (evaluation.policyFindings && evaluation.policyFindings.length > 0) {
+    lines.push(`### Policy Findings`, ``);
+    for (const finding of evaluation.policyFindings) {
+      lines.push(`- ${finding}`);
+    }
+    lines.push(``);
   }
 
   if (evaluation.policyOverride) {

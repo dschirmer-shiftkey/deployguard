@@ -28,6 +28,9 @@ jobs:
       - name: Build action
         run: npm run build
 
+      - name: Run detector fixture tests
+        run: npm run test -- src/__tests__/config.test.ts src/__tests__/evaluate-gate.test.ts src/__tests__/gate.test.ts src/__tests__/mcp.test.ts
+
       - name: Run Trailhead on this PR
         id: gate
         uses: ./
@@ -38,6 +41,12 @@ jobs:
           dora-metrics: "true"
           security-gate: "true"
 
+      - name: Validate structured outputs
+        if: always()
+        run: |
+          node -e "const e=JSON.parse(process.argv[1]); if(!e.pr || !e.pr.provenance) { throw new Error('Missing pr.provenance in evaluation-json'); } if(!e.trust_profile){ throw new Error('Missing trust_profile in evaluation-json'); }" '${{ steps.gate.outputs.evaluation-json }}'
+          node -e "const r=JSON.parse(process.argv[1]); if(!['go','review','hold'].includes(r.band)){ throw new Error('Invalid rollout readiness band'); } if(typeof r.ready!=='boolean'){ throw new Error('rollout ready flag missing'); }" '${{ steps.gate.outputs.rollout-readiness-json }}'
+
       - name: Print outputs
         if: always()
         run: |
@@ -46,6 +55,7 @@ jobs:
           echo "health-score:  ${{ steps.gate.outputs.health-score }}"
           echo "report-url:    ${{ steps.gate.outputs.report-url }}"
           echo "dora-rating:   ${{ steps.gate.outputs.dora-rating }}"
+          echo "rollout:       ${{ steps.gate.outputs.rollout-readiness-json }}"
           echo ""
           echo "--- evaluation-json (truncated) ---"
           echo '${{ steps.gate.outputs.evaluation-json }}' | head -c 500
