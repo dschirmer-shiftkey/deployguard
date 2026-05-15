@@ -175,6 +175,18 @@ describe("run (main entrypoint)", () => {
       "rollout-readiness-json",
       expect.stringContaining('"band"'),
     );
+    const rolloutOutputCall = mockSetOutput.mock.calls.find(
+      (c) => c[0] === "rollout-readiness-json",
+    );
+    expect(rolloutOutputCall).toBeDefined();
+    const rollout = JSON.parse(rolloutOutputCall![1] as string) as {
+      ready: boolean;
+      band: string;
+      score: number;
+    };
+    expect(typeof rollout.ready).toBe("boolean");
+    expect(["go", "review", "hold"]).toContain(rollout.band);
+    expect(typeof rollout.score).toBe("number");
     expect(mockInfo).toHaveBeenCalledWith("## Report");
     expect(mockSetFailed).not.toHaveBeenCalled();
   });

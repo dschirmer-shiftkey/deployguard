@@ -119,6 +119,16 @@ describe("evaluateGate (integration)", () => {
     expect(result.pr.provenance.confidence).toBeGreaterThan(0);
   });
 
+  it("includes trust profile metadata in evaluation payload", async () => {
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+    expect(result.trust_profile).toBeDefined();
+    expect(["baseline", "elevated", "strict"]).toContain(
+      result.trust_profile?.strictness,
+    );
+    expect(typeof result.trust_profile?.reason).toBe("string");
+  });
+
   it("respects custom warn threshold", async () => {
     const config = makeConfig({
       githubToken: "ghp_test",

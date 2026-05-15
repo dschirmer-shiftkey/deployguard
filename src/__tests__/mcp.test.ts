@@ -1059,3 +1059,86 @@ describe("MCP response format contract", () => {
     expect(result.content[0].text).toContain("  ");
   });
 });
+
+describe("MCP tool: recommend-policy-tuning (logic)", () => {
+  function recommendPolicyTuning(
+    records: Array<{ detector: string; disposition: "false_positive" | "true_positive" }>,
+    falsePositiveThreshold = 15,
+  ): Array<{
+    detector: string;
+    falsePositiveRate: number;
+    confidence: "low" | "medium" | "high";
+  }> {
+    const detectorStats = new Map<string, { total: number; falsePositive: number }>();
+    for (const record of records) {
+      const entry = detectorStats.get(record.detector) ?? { total: 0, falsePositive: 0 };
+      entry.total += 1;
+      if (record.disposition === "false_positive") entry.falsePositive += 1;
+      detectorStats.set(record.detector, entry);
+    }
+
+    return [...detectorStats.entries()]
+      .map(([detector, stat]) => ({
+        detector,
+        falsePositiveRate:
+          stat.total > 0 ? Math.round((stat.falsePositive / stat.total) * 1000) / 10 : 0,
+        confidence: (
+          stat.total >= 20 ? "high" : stat.total >= 8 ? "medium" : "low"
+        ) as "high" | "medium" | "low",
+      }))
+      .filter((s) => s.falsePositiveRate > falsePositiveThreshold);
+  }
+
+  it("recommends tuning when false positive rate exceeds threshold", () => {
+    const records = [
+      { detector: "ci_integrity", disposition: "false_positive" as const },
+      { detector: "ci_integrity", disposition: "false_positive" as const },
+      { detector: "ci_integrity", disposition: "true_positive" as const },
+      { detector: "ci_integrity", disposition: "false_positive" as const },
+      { detector: "workflow_security", disposition: "true_positive" as const },
+      { detector: "workflow_security", disposition: "true_positive" as const },
+    ];
+    const recommendations = recommendPolicyTuning(records, 15);
+    expect(recommendations.some((r) => r.detector === "ci_integrity")).toBe(true);
+    expect(recommendations.some((r) => r.detector === "workflow_security")).toBe(false);
+  });
+
+  it("returns higher confidence with larger sample size", () => {
+    const records = Array.from({ length: 20 }, (_, i) => ({
+      detector: "supply_chain",
+      disposition: (i < 8 ? "false_positive" : "true_positive") as
+        | "false_positive"
+        | "true_positive",
+    }));
+    const recommendations = recommendPolicyTuning(records, 15);
+    expect(recommendations[0].confidence).toBe("high");
+  });
+});
+
+describe("MCP tool: recommend-rollback (logic)", () => {
+  function recommendRollback(
+    provenanceType: "human" | "codex" | "claude" | "custom-bot" | "unknown",
+    canaryFailed: boolean,
+    mode: "off" | "proposal" | "auto",
+  ): string {
+    if (!canaryFailed || mode === "off") return "none";
+    if (provenanceType === "human") return "manual-review";
+    return mode === "auto" ? "open-revert-pr" : "propose-revert-pr";
+  }
+
+  it("returns none when canary did not fail", () => {
+    expect(recommendRollback("codex", false, "proposal")).toBe("none");
+  });
+
+  it("returns manual review for human provenance", () => {
+    expect(recommendRollback("human", true, "auto")).toBe("manual-review");
+  });
+
+  it("returns propose-revert-pr for automated provenance in proposal mode", () => {
+    expect(recommendRollback("claude", true, "proposal")).toBe("propose-revert-pr");
+  });
+
+  it("returns open-revert-pr for automated provenance in auto mode", () => {
+    expect(recommendRollback("custom-bot", true, "auto")).toBe("open-revert-pr");
+  });
+});
