@@ -609,6 +609,47 @@ describe("formatGateReport", () => {
     expect(report).toContain("[View full report](https://example.com/reports/abc)");
   });
 
+  it("includes PR provenance section when available", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      pr: {
+        provenance: {
+          type: "codex",
+          confidence: 0.88,
+          source: "author/branch/commit-signals",
+        },
+      },
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("PR Provenance");
+    expect(report).toContain("`codex`");
+    expect(report).toContain("`0.88`");
+  });
+
+  it("includes policy findings when present", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      policyFindings: ["Agent PR risk threshold tightened from 70 to 55."],
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("Policy Findings");
+    expect(report).toContain("threshold tightened");
+  });
+
+  it("includes session correlation section when present", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      session_correlation: {
+        burst_count: 4,
+        window: "60m",
+      },
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("Session Correlation");
+    expect(report).toContain("`4`");
+    expect(report).toContain("`60m`");
+  });
+
   it("omits sections that have no data", () => {
     const evaluation: GateEvaluation = {
       ...baseEvaluation,

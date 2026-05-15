@@ -6,81 +6,138 @@ import { RepoConfig } from "./types.js";
 import type { RepoConfig as RepoConfigType } from "./types.js";
 
 const yamlParse: ((input: string) => unknown) | null = null;
+const CURRENT_CONFIG_SCHEMA_VERSION = 1;
+const CONFIG_MIGRATION_GUIDE_URL =
+  "https://github.com/KomatikAI/trailhead/blob/main/docs/roadmap-agent-qa.md";
+const KNOWN_TOP_LEVEL_KEYS = new Set([
+  "schema_version",
+  "sensitivity",
+  "weights",
+  "thresholds",
+  "ignore",
+  "freeze",
+  "environments",
+  "services",
+  "security",
+  "canary",
+  "policies",
+]);
 
 function parseYaml(input: string): unknown {
   if (yamlParse) return yamlParse(input);
 
-  const lines = input.split("\n");
-  const result: Record<string, unknown> = {};
-  let currentKey = "";
-  let currentArray: string[] | null = null;
+  const lines = input
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""))
+    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
+  const root: Record<string, unknown> = {};
+  const stack: Array<{ indent: number; value: unknown }> = [{ indent: -1, value: root }];
 
-  for (const raw of lines) {
-    const line = raw.replace(/\r$/, "");
-    if (line.trim() === "" || line.trim().startsWith("#")) continue;
-
-    const topMatch = line.match(/^(\w[\w-]*):\s*(.*)$/);
-    if (topMatch) {
-      if (currentKey && currentArray) {
-        result[currentKey] = currentArray;
-        currentArray = null;
-      }
-      const [, key, val] = topMatch;
-      currentKey = key;
-      if (val && val.trim()) {
-        const numVal = Number(val.trim());
-        result[key] = isNaN(numVal) ? val.trim() : numVal;
-      }
-      continue;
+  const parseScalar = (value: string): unknown => {
+    const v = value.trim();
+    if (
+      (v.startsWith('"') && v.endsWith('"')) ||
+      (v.startsWith("'") && v.endsWith("'"))
+    ) {
+      return v.slice(1, -1);
     }
+    if (v === "true") return true;
+    if (v === "false") return false;
+    if (v === "null") return null;
+    const n = Number(v);
+    if (!Number.isNaN(n) && v !== "") return n;
+    return v;
+  };
 
-    const nestedObjMatch = line.match(/^\s{2}(\w[\w-]*):\s*(.*)$/);
-    if (nestedObjMatch) {
-      if (currentArray) {
-        result[currentKey] = currentArray;
-        currentArray = null;
+  const findNextSignificantLine = (fromIndex: number): string | null => {
+    for (let i = fromIndex + 1; i < lines.length; i += 1) {
+      const candidate = lines[i];
+      if (candidate.trim() !== "" && !candidate.trim().startsWith("#")) {
+        return candidate;
       }
-      const [, subKey, subVal] = nestedObjMatch;
-      if (typeof result[currentKey] !== "object" || Array.isArray(result[currentKey])) {
-        result[currentKey] = {};
-      }
-      const obj = result[currentKey] as Record<string, unknown>;
-      if (subVal && subVal.trim()) {
-        const numVal = Number(subVal.trim());
-        obj[subKey] = isNaN(numVal) ? subVal.trim() : numVal;
+    }
+    return null;
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    const trimmed = line.trim();
+
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+    const container = stack[stack.length - 1].value;
+
+    if (trimmed.startsWith("- ")) {
+      if (!Array.isArray(container)) continue;
+      const itemRaw = trimmed.slice(2).trim();
+      if (itemRaw === "") {
+        const child: Record<string, unknown> = {};
+        container.push(child);
+        stack.push({ indent, value: child });
       } else {
-        obj[subKey] = [];
+        container.push(parseScalar(itemRaw));
       }
       continue;
     }
 
-    const arrayItemMatch = line.match(/^\s+-\s+"?([^"]*)"?\s*$/);
-    if (arrayItemMatch) {
-      const val = arrayItemMatch[1];
-      if (
-        currentKey &&
-        typeof result[currentKey] === "object" &&
-        !Array.isArray(result[currentKey])
-      ) {
-        const obj = result[currentKey] as Record<string, unknown>;
-        const keys = Object.keys(obj);
-        const lastKey = keys[keys.length - 1];
-        if (lastKey && Array.isArray(obj[lastKey])) {
-          (obj[lastKey] as string[]).push(val);
-        }
-      } else {
-        if (!currentArray) currentArray = [];
-        currentArray.push(val);
-      }
+    const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (
+      !keyMatch ||
+      typeof container !== "object" ||
+      container === null ||
+      Array.isArray(container)
+    ) {
       continue;
     }
+
+    const [, key, rawVal] = keyMatch;
+    if (rawVal !== "") {
+      (container as Record<string, unknown>)[key] = parseScalar(rawVal);
+      continue;
+    }
+
+    const nextLine = findNextSignificantLine(i);
+    const nextIndent = nextLine?.match(/^ */)?.[0].length ?? -1;
+    const nextTrimmed = nextLine?.trim() ?? "";
+    const useArray =
+      nextLine !== null && nextIndent > indent && nextTrimmed.startsWith("- ");
+    const child: unknown = useArray ? [] : {};
+    (container as Record<string, unknown>)[key] = child;
+    stack.push({ indent, value: child });
   }
 
-  if (currentKey && currentArray) {
-    result[currentKey] = currentArray;
+  return root;
+}
+
+function warnUnknownTopLevelKeys(raw: unknown, configPath: string): void {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+
+  for (const key of Object.keys(raw as Record<string, unknown>)) {
+    if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+      core.warning(
+        `${configPath}: unknown top-level key "${key}" will be ignored. ` +
+          `See migration guide: ${CONFIG_MIGRATION_GUIDE_URL}`,
+      );
+    }
+  }
+}
+
+function validateSchemaVersion(
+  parsedConfig: RepoConfigType,
+  configPath: string,
+): RepoConfigType | null {
+  if (parsedConfig.schema_version !== CURRENT_CONFIG_SCHEMA_VERSION) {
+    core.warning(
+      `${configPath}: unsupported schema_version=${parsedConfig.schema_version}. ` +
+        `Expected ${CURRENT_CONFIG_SCHEMA_VERSION}. ` +
+        `Migration guide: ${CONFIG_MIGRATION_GUIDE_URL}`,
+    );
+    return null;
   }
 
-  return result;
+  return parsedConfig;
 }
 
 export async function loadRepoConfig(token?: string): Promise<RepoConfigType | null> {
@@ -108,6 +165,7 @@ export async function loadRepoConfig(token?: string): Promise<RepoConfigType | n
 
     const content = Buffer.from(data.content, "base64").toString("utf-8");
     const raw = parseYaml(content);
+    warnUnknownTopLevelKeys(raw, configPath);
     const parsed = RepoConfig.safeParse(raw);
 
     if (!parsed.success) {
@@ -115,8 +173,11 @@ export async function loadRepoConfig(token?: string): Promise<RepoConfigType | n
       return null;
     }
 
-    core.debug(`Loaded ${configPath}: ${JSON.stringify(parsed.data)}`);
-    return parsed.data;
+    const validated = validateSchemaVersion(parsed.data, configPath);
+    if (!validated) return null;
+
+    core.debug(`Loaded ${configPath}: ${JSON.stringify(validated)}`);
+    return validated;
   } catch (error) {
     const msg = String(error);
     if (!msg.includes("404") && !msg.includes("Not Found")) {
@@ -134,6 +195,7 @@ async function loadLocalRepoConfig(): Promise<RepoConfigType | null> {
     try {
       const content = await readFile(path.join(workspace, configPath), "utf-8");
       const raw = parseYaml(content);
+      warnUnknownTopLevelKeys(raw, configPath);
       const parsed = RepoConfig.safeParse(raw);
 
       if (!parsed.success) {
@@ -143,8 +205,11 @@ async function loadLocalRepoConfig(): Promise<RepoConfigType | null> {
         return null;
       }
 
-      core.debug(`Loaded local ${configPath}: ${JSON.stringify(parsed.data)}`);
-      return parsed.data;
+      const validated = validateSchemaVersion(parsed.data, configPath);
+      if (!validated) return null;
+
+      core.debug(`Loaded local ${configPath}: ${JSON.stringify(validated)}`);
+      return validated;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {

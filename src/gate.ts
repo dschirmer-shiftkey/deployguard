@@ -7,6 +7,7 @@ import type {
   GateDecision,
   GateEvaluation,
   HealthCheckResult,
+  PrProvenance,
   RepoConfig,
   RiskFactor,
 } from "./types.js";
@@ -17,6 +18,7 @@ import {
   detectDependencyChanges,
   decideGate,
   isSensitiveFile,
+  matchesGlobs,
   sensitivityWeight as sensitivityWeightShared,
   isInFreezeWindow,
   type FileInfo,
@@ -49,6 +51,7 @@ interface PrFileInfo {
   additions: number;
   deletions: number;
   changes: number;
+  patch?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +82,7 @@ async function fetchPrFilesFromApi(
     additions: f.additions,
     deletions: f.deletions,
     changes: f.changes,
+    patch: f.patch,
   }));
 }
 
@@ -116,6 +120,7 @@ async function fetchPrFilesFromCommits(
           additions: f.additions ?? 0,
           deletions: f.deletions ?? 0,
           changes: f.changes ?? 0,
+          patch: undefined,
         });
       }
     }
@@ -303,6 +308,348 @@ async function computePrAge(prNumber: number, token: string): Promise<RiskFactor
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// PR provenance detection
+// ---------------------------------------------------------------------------
+
+function classifyFromSignals(signals: string[]): PrProvenance {
+  const text = signals.join(" ").toLowerCase();
+  const candidates: Record<PrProvenance["type"], number> = {
+    human: 0.55,
+    dependabot: 0,
+    copilot: 0,
+    codex: 0,
+    claude: 0,
+    "custom-bot": 0,
+    unknown: 0.25,
+  };
+
+  if (/\[bot\]/.test(text))
+    candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.8);
+  if (/dependabot/.test(text)) candidates.dependabot = 0.99;
+  if (/copilot/.test(text)) candidates.copilot = Math.max(candidates.copilot, 0.93);
+  if (/\bclaude\b|anthropic/.test(text))
+    candidates.claude = Math.max(candidates.claude, 0.92);
+  if (/\bcodex\b|\bopenai\b/.test(text))
+    candidates.codex = Math.max(candidates.codex, 0.9);
+  if (/^cursor\/| cursor\//.test(text))
+    candidates.codex = Math.max(candidates.codex, 0.82);
+  if (/^agent\/| agent\//.test(text)) {
+    candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.86);
+  }
+
+  if (candidates["custom-bot"] >= 0.8) {
+    candidates.human = Math.min(candidates.human, 0.2);
+  }
+
+  let bestType: PrProvenance["type"] = "unknown";
+  let bestConfidence = 0;
+  for (const [type, confidence] of Object.entries(candidates) as Array<
+    [PrProvenance["type"], number]
+  >) {
+    if (confidence > bestConfidence) {
+      bestType = type;
+      bestConfidence = confidence;
+    }
+  }
+
+  return {
+    type: bestType,
+    confidence: Math.round(bestConfidence * 100) / 100,
+    source: "author/branch/commit-signals",
+  };
+}
+
+async function detectPrProvenance(
+  prNumber: number,
+  token: string,
+): Promise<PrProvenance | null> {
+  try {
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+
+    const [{ data: pr }, { data: commits }] = await Promise.all([
+      octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: prNumber,
+      }),
+      octokit.rest.pulls.listCommits({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 50,
+      }),
+    ]);
+
+    const signals: string[] = [];
+    if (pr.user?.login) signals.push(pr.user.login);
+    if (pr.head?.ref) signals.push(pr.head.ref);
+    for (const commit of commits) {
+      if (commit.author?.login) signals.push(commit.author.login);
+      if (commit.commit?.author?.name) signals.push(commit.commit.author.name);
+      if (commit.commit?.author?.email) signals.push(commit.commit.author.email);
+      if (commit.committer?.login) signals.push(commit.committer.login);
+    }
+
+    if (signals.length === 0) {
+      return { type: "unknown", confidence: 0.2, source: "insufficient-signals" };
+    }
+
+    return classifyFromSignals(signals);
+  } catch (error) {
+    core.debug(`Failed to detect PR provenance: ${error}`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CI integrity detection
+// ---------------------------------------------------------------------------
+
+interface CiIntegrityDetection {
+  factor: RiskFactor | null;
+  blockingPatterns: string[];
+}
+
+function detectCiIntegrityRisk(files: PrFileInfo[]): CiIntegrityDetection {
+  const blockingPatterns: string[] = [];
+  const warningSignals: string[] = [];
+  let score = 0;
+
+  const workflowFiles = files.filter((f) => f.filename.startsWith(".github/workflows/"));
+  const testFiles = files.filter((f) =>
+    /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/.test(f.filename),
+  );
+
+  for (const file of workflowFiles) {
+    const patch = file.patch ?? "";
+    if (/\|\|\s*true/.test(patch)) {
+      blockingPatterns.push(`${file.filename}: workflow bypass pattern "|| true"`);
+      score += 45;
+    }
+    if (/^\+\s*continue-on-error:\s*true\b/m.test(patch)) {
+      blockingPatterns.push(`${file.filename}: introduced "continue-on-error: true"`);
+      score += 45;
+    }
+    if (/^\+\s*if:\s*\$\{\{\s*always\(\)\s*\}\}/m.test(patch)) {
+      warningSignals.push(`${file.filename}: always() condition added to workflow gate`);
+      score += 20;
+    }
+  }
+
+  for (const file of testFiles) {
+    if (file.deletions > file.additions * 2 && file.deletions >= 10) {
+      warningSignals.push(
+        `${file.filename}: heavy test deletion (${file.deletions} deleted / ${file.additions} added)`,
+      );
+      score += 25;
+    }
+  }
+
+  for (const file of files) {
+    const patch = file.patch ?? "";
+    if (!patch) continue;
+    if (
+      /^\-\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch) &&
+      /^\+\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch)
+    ) {
+      warningSignals.push(`${file.filename}: coverage threshold definition changed`);
+      score += 20;
+    }
+  }
+
+  if (score === 0) {
+    return { factor: null, blockingPatterns: [] };
+  }
+
+  const factor: RiskFactor = {
+    type: "ci_integrity",
+    score: Math.min(100, score),
+    detail: {
+      blockingPatterns,
+      warningSignals,
+      description: "CI confidence and workflow integrity signals",
+    },
+  };
+
+  return { factor, blockingPatterns };
+}
+
+// ---------------------------------------------------------------------------
+// Session correlation (rapid-fire merge burst)
+// ---------------------------------------------------------------------------
+
+interface SessionCorrelationResult {
+  burstCount: number;
+  windowMinutes: number;
+}
+
+async function detectSessionCorrelation(params: {
+  prNumber?: number;
+  token?: string;
+  provenance: PrProvenance | null;
+  repoConfig: RepoConfig | null;
+}): Promise<SessionCorrelationResult | null> {
+  const cfg = params.repoConfig?.policies?.session_correlation;
+  if (!cfg?.enabled || !params.prNumber || !params.token || !params.provenance)
+    return null;
+  if (params.provenance.type === "human") return null;
+
+  try {
+    const octokit = github.getOctokit(params.token);
+    const { owner, repo } = github.context.repo;
+    const { data: currentPr } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: params.prNumber,
+    });
+    const author = currentPr.user?.login;
+    if (!author) return null;
+
+    const sinceMs = Date.now() - cfg.window_minutes * 60 * 1000;
+    const { data: closedPrs } = await octokit.rest.pulls.list({
+      owner,
+      repo,
+      state: "closed",
+      sort: "updated",
+      direction: "desc",
+      per_page: 100,
+    });
+
+    const mergedInWindow = closedPrs.filter((pr) => {
+      if (!pr.merged_at) return false;
+      if (pr.user?.login !== author) return false;
+      const mergedAt = Date.parse(pr.merged_at);
+      return !Number.isNaN(mergedAt) && mergedAt >= sinceMs;
+    });
+
+    return {
+      burstCount: mergedInWindow.length,
+      windowMinutes: cfg.window_minutes,
+    };
+  } catch (error) {
+    core.debug(`Session correlation detection failed: ${error}`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent PR policy enforcement
+// ---------------------------------------------------------------------------
+
+interface AgentPolicyEnforcementResult {
+  adjustedRiskThreshold?: number;
+  forceBlock: boolean;
+  findings: string[];
+}
+
+function isAgentProvenanceType(type: PrProvenance["type"]): boolean {
+  return type !== "human";
+}
+
+async function enforceAgentPrPolicies(params: {
+  prNumber?: number;
+  token?: string;
+  files: PrFileInfo[];
+  repoConfig: RepoConfig | null;
+  provenance: PrProvenance | null;
+  currentRiskThreshold: number;
+}): Promise<AgentPolicyEnforcementResult | null> {
+  const policy = params.repoConfig?.policies?.agent_prs;
+  if (!policy?.enabled || !params.prNumber || !params.token) return null;
+
+  const provenanceType = params.provenance?.type ?? "unknown";
+  const isUnknownStrict =
+    provenanceType === "unknown" && policy.strict_on_unknown_provenance;
+  const shouldTreatAsAgent = isUnknownStrict || isAgentProvenanceType(provenanceType);
+  if (!shouldTreatAsAgent) return null;
+
+  const findings: string[] = [];
+  let adjustedRiskThreshold: number | undefined;
+  let forceBlock = false;
+
+  if (isUnknownStrict) {
+    findings.push(
+      "PR provenance is unknown and strict mode is enabled; applying agent PR policy checks.",
+    );
+  }
+
+  if (
+    policy.risk_threshold !== undefined &&
+    policy.risk_threshold < params.currentRiskThreshold
+  ) {
+    adjustedRiskThreshold = policy.risk_threshold;
+    findings.push(
+      `Agent PR risk threshold tightened from ${params.currentRiskThreshold} to ${policy.risk_threshold}.`,
+    );
+  }
+
+  const sensitivePatterns =
+    policy.sensitive_paths.length > 0
+      ? policy.sensitive_paths
+      : (params.repoConfig?.sensitivity.high ?? []);
+  const touchesSensitivePaths =
+    params.files.some((f) =>
+      sensitivePatterns.length > 0
+        ? matchesGlobs(f.filename, sensitivePatterns)
+        : isSensitiveFile(f.filename),
+    ) || params.files.some((f) => isSensitiveFile(f.filename));
+
+  if (!touchesSensitivePaths) {
+    return { adjustedRiskThreshold, forceBlock, findings };
+  }
+
+  try {
+    const octokit = github.getOctokit(params.token);
+    const { owner, repo } = github.context.repo;
+    const { data: reviews } = await octokit.rest.pulls.listReviews({
+      owner,
+      repo,
+      pull_number: params.prNumber,
+      per_page: 100,
+    });
+
+    const approvedBy = new Set(
+      reviews
+        .filter((r) => r.state === "APPROVED")
+        .map((r) => r.user?.login)
+        .filter((u): u is string => Boolean(u)),
+    );
+
+    if (approvedBy.size < policy.required_approvals) {
+      forceBlock = true;
+      findings.push(
+        `Sensitive-path agent PR requires ${policy.required_approvals} approval(s); found ${approvedBy.size}.`,
+      );
+    }
+
+    if (policy.require_code_owner_approval) {
+      if (policy.code_owner_reviewers.length === 0) {
+        forceBlock = true;
+        findings.push(
+          "Code-owner approval required for sensitive-path agent PRs, but no code_owner_reviewers configured.",
+        );
+      } else {
+        const hasCodeOwnerApproval = policy.code_owner_reviewers.some((r) =>
+          approvedBy.has(r),
+        );
+        if (!hasCodeOwnerApproval) {
+          forceBlock = true;
+          findings.push(
+            `Sensitive-path agent PR requires one code-owner approval (${policy.code_owner_reviewers.join(", ")}).`,
+          );
+        }
+      }
+    }
+  } catch (error) {
+    core.debug(`Agent PR policy review check failed: ${error}`);
+    // Fail-open remains the default: do not force block on API errors.
+  }
+
+  return { adjustedRiskThreshold, forceBlock, findings };
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +959,7 @@ export async function evaluateGate(
     files,
     authorFactor,
     prAgeFactor,
+    provenance,
     httpHealthChecks,
     vercelCheck,
     supabaseCheck,
@@ -625,6 +973,9 @@ export async function evaluateGate(
       : Promise.resolve(null),
     prNumber && config.githubToken
       ? computePrAge(prNumber, config.githubToken)
+      : Promise.resolve(null),
+    prNumber && config.githubToken
+      ? detectPrProvenance(prNumber, config.githubToken)
       : Promise.resolve(null),
     config.healthCheckUrls.length > 0
       ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
@@ -646,6 +997,8 @@ export async function evaluateGate(
     envConfig?.risk ?? repoConfig?.thresholds.risk ?? config.riskThreshold;
   const effectiveWarnThreshold =
     envConfig?.warn ?? repoConfig?.thresholds.warn ?? config.warnThreshold;
+  let adjustedRiskThreshold = effectiveRiskThreshold;
+  const policyFindings: string[] = [];
 
   const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
   if (freezeCheck.frozen) {
@@ -672,10 +1025,52 @@ export async function evaluateGate(
   }
 
   const customWeights = repoConfig?.weights ?? {};
+  const ciIntegrityConfig = repoConfig?.policies?.ci_integrity;
+  const ciIntegrity =
+    ciIntegrityConfig?.enabled === false
+      ? { factor: null, blockingPatterns: [] }
+      : detectCiIntegrityRisk(files);
+  if (ciIntegrity.factor) {
+    riskFactors.push(ciIntegrity.factor);
+  }
   const riskScore =
     riskFactors.length > 0
       ? weightedAverageScores(riskFactors as RiskFactorResult[], customWeights)
       : localRiskScore;
+
+  const agentPolicy = await enforceAgentPrPolicies({
+    prNumber,
+    token: config.githubToken,
+    files,
+    repoConfig,
+    provenance,
+    currentRiskThreshold: adjustedRiskThreshold,
+  });
+  if (agentPolicy?.adjustedRiskThreshold !== undefined) {
+    adjustedRiskThreshold = agentPolicy.adjustedRiskThreshold;
+  }
+  if (agentPolicy?.findings.length) {
+    policyFindings.push(...agentPolicy.findings);
+  }
+
+  const sessionCorrelation = await detectSessionCorrelation({
+    prNumber,
+    token: config.githubToken,
+    provenance,
+    repoConfig,
+  });
+  const sessionCfg = repoConfig?.policies?.session_correlation;
+  if (sessionCorrelation && sessionCfg) {
+    const threshold = sessionCfg.threshold;
+    if (sessionCorrelation.burstCount >= threshold) {
+      policyFindings.push(
+        `Rapid-fire merge burst detected: ${sessionCorrelation.burstCount} merged PRs in ${sessionCorrelation.windowMinutes} minutes.`,
+      );
+      if (sessionCfg.mode === "block") {
+        policyFindings.push("Session correlation policy is configured to block.");
+      }
+    }
+  }
 
   const healthChecks: HealthCheckResult[] = [...httpHealthChecks];
   if (vercelCheck) healthChecks.push(vercelCheck);
@@ -683,14 +1078,30 @@ export async function evaluateGate(
   if (mcpCheck) healthChecks.push(mcpCheck);
 
   const healthScore = aggregateHealthScore(healthChecks);
-  const gateDecision = freezeCheck.frozen
+  const baselineDecision = freezeCheck.frozen
     ? ("block" as GateDecision)
     : (decideGate(
         riskScore,
         healthScore,
-        effectiveRiskThreshold,
+        adjustedRiskThreshold,
         effectiveWarnThreshold,
       ) as GateDecision);
+  const gateDecision =
+    agentPolicy?.forceBlock === true ||
+    (ciIntegrity.blockingPatterns.length > 0 &&
+      (ciIntegrityConfig?.mode ?? "block") === "block") ||
+    (sessionCorrelation &&
+      sessionCfg &&
+      sessionCorrelation.burstCount >= sessionCfg.threshold &&
+      sessionCfg.mode === "block")
+      ? ("block" as GateDecision)
+      : baselineDecision;
+
+  if (ciIntegrity.blockingPatterns.length > 0) {
+    policyFindings.push(
+      `CI integrity blocking patterns detected (${ciIntegrity.blockingPatterns.length}).`,
+    );
+  }
 
   const fileNames = files.map((f) => f.filename);
 
@@ -707,6 +1118,25 @@ export async function evaluateGate(
     files: fileNames.length > 0 ? fileNames : undefined,
     evaluationMs: Date.now() - start,
     environment: config.environment,
+    policyFindings: policyFindings.length > 0 ? policyFindings : undefined,
+    pr: prNumber
+      ? {
+          provenance:
+            provenance ??
+            ({
+              type: "unknown",
+              confidence: 0.2,
+              source: "not-detected",
+            } as PrProvenance),
+        }
+      : undefined,
+    session_correlation:
+      sessionCorrelation && sessionCorrelation.burstCount > 0
+        ? {
+            burst_count: sessionCorrelation.burstCount,
+            window: `${sessionCorrelation.windowMinutes}m`,
+          }
+        : undefined,
   };
 
   if (config.apiKey) {
@@ -1157,6 +1587,37 @@ export function formatGateReport(
 
   if (riskThreshold !== undefined) {
     lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
+  }
+
+  if (evaluation.pr?.provenance) {
+    lines.push(
+      `### PR Provenance`,
+      ``,
+      `- Type: \`${evaluation.pr.provenance.type}\``,
+      `- Confidence: \`${evaluation.pr.provenance.confidence}\``,
+      ...(evaluation.pr.provenance.source
+        ? [`- Source: ${evaluation.pr.provenance.source}`]
+        : []),
+      ``,
+    );
+  }
+
+  if (evaluation.session_correlation) {
+    lines.push(
+      `### Session Correlation`,
+      ``,
+      `- Burst count: \`${evaluation.session_correlation.burst_count}\``,
+      `- Window: \`${evaluation.session_correlation.window}\``,
+      ``,
+    );
+  }
+
+  if (evaluation.policyFindings && evaluation.policyFindings.length > 0) {
+    lines.push(`### Policy Findings`, ``);
+    for (const finding of evaluation.policyFindings) {
+      lines.push(`- ${finding}`);
+    }
+    lines.push(``);
   }
 
   if (evaluation.policyOverride) {

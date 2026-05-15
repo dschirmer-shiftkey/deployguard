@@ -108,6 +108,17 @@ describe("evaluateGate (integration)", () => {
     expect(authorFactor!.score).toBeGreaterThanOrEqual(0);
   });
 
+  it("adds PR provenance metadata to evaluation-json payload", async () => {
+    const config = makeConfig({ githubToken: "ghp_test" });
+    const result = await evaluateGate(config, "abc1234567890", 42);
+    expect(result.pr?.provenance).toBeDefined();
+    if (!result.pr?.provenance) {
+      throw new Error("Expected provenance to be populated");
+    }
+    expect(result.pr.provenance.type).toBe("human");
+    expect(result.pr.provenance.confidence).toBeGreaterThan(0);
+  });
+
   it("respects custom warn threshold", async () => {
     const config = makeConfig({
       githubToken: "ghp_test",

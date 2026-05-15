@@ -40291,9 +40291,23 @@ const RiskFactor = objectType({
         "security_alerts",
         "deployment_history",
         "canary_status",
+        "ci_integrity",
     ]),
     score: numberType().min(0).max(100),
     detail: recordType(unknownType()).optional(),
+});
+const PrProvenance = objectType({
+    type: enumType([
+        "human",
+        "dependabot",
+        "copilot",
+        "codex",
+        "claude",
+        "custom-bot",
+        "unknown",
+    ]),
+    confidence: numberType().min(0).max(1),
+    source: stringType().optional(),
 });
 const GateEvaluation = objectType({
     id: stringType(),
@@ -40310,6 +40324,16 @@ const GateEvaluation = objectType({
     reportUrl: stringType().url().optional(),
     environment: stringType().optional(),
     service: stringType().optional(),
+    policyFindings: arrayType(stringType()).optional(),
+    pr: objectType({
+        provenance: PrProvenance.optional(),
+    })
+        .optional(),
+    session_correlation: objectType({
+        burst_count: numberType().int().min(0),
+        window: stringType(),
+    })
+        .optional(),
     policyOverride: objectType({
         owner: stringType(),
         reason: stringType(),
@@ -40361,6 +40385,7 @@ const CanaryConfig = objectType({
     rollback_on_failure: booleanType().default(false),
 });
 const RepoConfig = objectType({
+    schema_version: numberType().int().positive().default(1),
     sensitivity: objectType({
         high: arrayType(stringType()).default([]),
         medium: arrayType(stringType()).default([]),
@@ -40379,6 +40404,31 @@ const RepoConfig = objectType({
     services: recordType(ServiceMapping).default({}),
     security: SecurityConfig.default({}),
     canary: CanaryConfig.optional(),
+    policies: objectType({
+        agent_prs: objectType({
+            enabled: booleanType().default(false),
+            risk_threshold: numberType().min(0).max(100).optional(),
+            required_approvals: numberType().int().min(0).default(1),
+            require_code_owner_approval: booleanType().default(false),
+            code_owner_reviewers: arrayType(stringType()).default([]),
+            sensitive_paths: arrayType(stringType()).default([]),
+            strict_on_unknown_provenance: booleanType().default(true),
+        })
+            .default({}),
+        session_correlation: objectType({
+            enabled: booleanType().default(false),
+            threshold: numberType().int().min(2).default(3),
+            window_minutes: numberType().int().min(5).default(60),
+            mode: enumType(["warn", "block"]).default("warn"),
+        })
+            .default({}),
+        ci_integrity: objectType({
+            enabled: booleanType().default(true),
+            mode: enumType(["warn", "block"]).default("block"),
+        })
+            .default({}),
+    })
+        .default({}),
 });
 
 ;// CONCATENATED MODULE: external "node:fs/promises"
@@ -40711,76 +40761,118 @@ function isRollback(prTitle) {
 
 
 const yamlParse = null;
+const CURRENT_CONFIG_SCHEMA_VERSION = 1;
+const CONFIG_MIGRATION_GUIDE_URL = "https://github.com/KomatikAI/trailhead/blob/main/docs/roadmap-agent-qa.md";
+const KNOWN_TOP_LEVEL_KEYS = new Set([
+    "schema_version",
+    "sensitivity",
+    "weights",
+    "thresholds",
+    "ignore",
+    "freeze",
+    "environments",
+    "services",
+    "security",
+    "canary",
+    "policies",
+]);
 function parseYaml(input) {
     if (yamlParse)
         return yamlParse(input);
-    const lines = input.split("\n");
-    const result = {};
-    let currentKey = "";
-    let currentArray = null;
-    for (const raw of lines) {
-        const line = raw.replace(/\r$/, "");
-        if (line.trim() === "" || line.trim().startsWith("#"))
-            continue;
-        const topMatch = line.match(/^(\w[\w-]*):\s*(.*)$/);
-        if (topMatch) {
-            if (currentKey && currentArray) {
-                result[currentKey] = currentArray;
-                currentArray = null;
-            }
-            const [, key, val] = topMatch;
-            currentKey = key;
-            if (val && val.trim()) {
-                const numVal = Number(val.trim());
-                result[key] = isNaN(numVal) ? val.trim() : numVal;
-            }
-            continue;
+    const lines = input
+        .split("\n")
+        .map((line) => line.replace(/\r$/, ""))
+        .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
+    const root = {};
+    const stack = [{ indent: -1, value: root }];
+    const parseScalar = (value) => {
+        const v = value.trim();
+        if ((v.startsWith('"') && v.endsWith('"')) ||
+            (v.startsWith("'") && v.endsWith("'"))) {
+            return v.slice(1, -1);
         }
-        const nestedObjMatch = line.match(/^\s{2}(\w[\w-]*):\s*(.*)$/);
-        if (nestedObjMatch) {
-            if (currentArray) {
-                result[currentKey] = currentArray;
-                currentArray = null;
+        if (v === "true")
+            return true;
+        if (v === "false")
+            return false;
+        if (v === "null")
+            return null;
+        const n = Number(v);
+        if (!Number.isNaN(n) && v !== "")
+            return n;
+        return v;
+    };
+    const findNextSignificantLine = (fromIndex) => {
+        for (let i = fromIndex + 1; i < lines.length; i += 1) {
+            const candidate = lines[i];
+            if (candidate.trim() !== "" && !candidate.trim().startsWith("#")) {
+                return candidate;
             }
-            const [, subKey, subVal] = nestedObjMatch;
-            if (typeof result[currentKey] !== "object" || Array.isArray(result[currentKey])) {
-                result[currentKey] = {};
-            }
-            const obj = result[currentKey];
-            if (subVal && subVal.trim()) {
-                const numVal = Number(subVal.trim());
-                obj[subKey] = isNaN(numVal) ? subVal.trim() : numVal;
+        }
+        return null;
+    };
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        const indent = line.match(/^ */)?.[0].length ?? 0;
+        const trimmed = line.trim();
+        while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+            stack.pop();
+        }
+        const container = stack[stack.length - 1].value;
+        if (trimmed.startsWith("- ")) {
+            if (!Array.isArray(container))
+                continue;
+            const itemRaw = trimmed.slice(2).trim();
+            if (itemRaw === "") {
+                const child = {};
+                container.push(child);
+                stack.push({ indent, value: child });
             }
             else {
-                obj[subKey] = [];
+                container.push(parseScalar(itemRaw));
             }
             continue;
         }
-        const arrayItemMatch = line.match(/^\s+-\s+"?([^"]*)"?\s*$/);
-        if (arrayItemMatch) {
-            const val = arrayItemMatch[1];
-            if (currentKey &&
-                typeof result[currentKey] === "object" &&
-                !Array.isArray(result[currentKey])) {
-                const obj = result[currentKey];
-                const keys = Object.keys(obj);
-                const lastKey = keys[keys.length - 1];
-                if (lastKey && Array.isArray(obj[lastKey])) {
-                    obj[lastKey].push(val);
-                }
-            }
-            else {
-                if (!currentArray)
-                    currentArray = [];
-                currentArray.push(val);
-            }
+        const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+        if (!keyMatch ||
+            typeof container !== "object" ||
+            container === null ||
+            Array.isArray(container)) {
             continue;
         }
+        const [, key, rawVal] = keyMatch;
+        if (rawVal !== "") {
+            container[key] = parseScalar(rawVal);
+            continue;
+        }
+        const nextLine = findNextSignificantLine(i);
+        const nextIndent = nextLine?.match(/^ */)?.[0].length ?? -1;
+        const nextTrimmed = nextLine?.trim() ?? "";
+        const useArray = nextLine !== null && nextIndent > indent && nextTrimmed.startsWith("- ");
+        const child = useArray ? [] : {};
+        container[key] = child;
+        stack.push({ indent, value: child });
     }
-    if (currentKey && currentArray) {
-        result[currentKey] = currentArray;
+    return root;
+}
+function warnUnknownTopLevelKeys(raw, configPath) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        return;
+    for (const key of Object.keys(raw)) {
+        if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+            core.warning(`${configPath}: unknown top-level key "${key}" will be ignored. ` +
+                `See migration guide: ${CONFIG_MIGRATION_GUIDE_URL}`);
+        }
     }
-    return result;
+}
+function validateSchemaVersion(parsedConfig, configPath) {
+    if (parsedConfig.schema_version !== CURRENT_CONFIG_SCHEMA_VERSION) {
+        core.warning(`${configPath}: unsupported schema_version=${parsedConfig.schema_version}. ` +
+            `Expected ${CURRENT_CONFIG_SCHEMA_VERSION}. ` +
+            `Migration guide: ${CONFIG_MIGRATION_GUIDE_URL}`);
+        return null;
+    }
+    return parsedConfig;
 }
 async function loadRepoConfig(token) {
     const localConfig = await loadLocalRepoConfig();
@@ -40804,13 +40896,17 @@ async function loadRepoConfig(token) {
         }
         const content = Buffer.from(data.content, "base64").toString("utf-8");
         const raw = parseYaml(content);
+        warnUnknownTopLevelKeys(raw, configPath);
         const parsed = RepoConfig.safeParse(raw);
         if (!parsed.success) {
             core.warning(`${configPath} parse error: ${parsed.error.message} — using defaults`);
             return null;
         }
-        core.debug(`Loaded ${configPath}: ${JSON.stringify(parsed.data)}`);
-        return parsed.data;
+        const validated = validateSchemaVersion(parsed.data, configPath);
+        if (!validated)
+            return null;
+        core.debug(`Loaded ${configPath}: ${JSON.stringify(validated)}`);
+        return validated;
     }
     catch (error) {
         const msg = String(error);
@@ -40828,13 +40924,17 @@ async function loadLocalRepoConfig() {
         try {
             const content = await (0,promises_namespaceObject.readFile)(external_node_path_default().join(workspace, configPath), "utf-8");
             const raw = parseYaml(content);
+            warnUnknownTopLevelKeys(raw, configPath);
             const parsed = RepoConfig.safeParse(raw);
             if (!parsed.success) {
                 core.warning(`${configPath} parse error: ${parsed.error.message} — using defaults`);
                 return null;
             }
-            core.debug(`Loaded local ${configPath}: ${JSON.stringify(parsed.data)}`);
-            return parsed.data;
+            const validated = validateSchemaVersion(parsed.data, configPath);
+            if (!validated)
+                return null;
+            core.debug(`Loaded local ${configPath}: ${JSON.stringify(validated)}`);
+            return validated;
         }
         catch (error) {
             const code = error.code;
@@ -41040,6 +41140,7 @@ async function fetchPrFilesFromApi(octokit, owner, repo, prNumber) {
         additions: f.additions,
         deletions: f.deletions,
         changes: f.changes,
+        patch: f.patch,
     }));
 }
 async function fetchPrFilesFromCommits(octokit, owner, repo, prNumber) {
@@ -41069,6 +41170,7 @@ async function fetchPrFilesFromCommits(octokit, owner, repo, prNumber) {
                     additions: f.additions ?? 0,
                     deletions: f.deletions ?? 0,
                     changes: f.changes ?? 0,
+                    patch: undefined,
                 });
             }
         }
@@ -41220,6 +41322,258 @@ async function computePrAge(prNumber, token) {
     catch {
         return null;
     }
+}
+// ---------------------------------------------------------------------------
+// PR provenance detection
+// ---------------------------------------------------------------------------
+function classifyFromSignals(signals) {
+    const text = signals.join(" ").toLowerCase();
+    const candidates = {
+        human: 0.55,
+        dependabot: 0,
+        copilot: 0,
+        codex: 0,
+        claude: 0,
+        "custom-bot": 0,
+        unknown: 0.25,
+    };
+    if (/\[bot\]/.test(text))
+        candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.8);
+    if (/dependabot/.test(text))
+        candidates.dependabot = 0.99;
+    if (/copilot/.test(text))
+        candidates.copilot = Math.max(candidates.copilot, 0.93);
+    if (/\bclaude\b|anthropic/.test(text))
+        candidates.claude = Math.max(candidates.claude, 0.92);
+    if (/\bcodex\b|\bopenai\b/.test(text))
+        candidates.codex = Math.max(candidates.codex, 0.9);
+    if (/^cursor\/| cursor\//.test(text))
+        candidates.codex = Math.max(candidates.codex, 0.82);
+    if (/^agent\/| agent\//.test(text)) {
+        candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.86);
+    }
+    if (candidates["custom-bot"] >= 0.8) {
+        candidates.human = Math.min(candidates.human, 0.2);
+    }
+    let bestType = "unknown";
+    let bestConfidence = 0;
+    for (const [type, confidence] of Object.entries(candidates)) {
+        if (confidence > bestConfidence) {
+            bestType = type;
+            bestConfidence = confidence;
+        }
+    }
+    return {
+        type: bestType,
+        confidence: Math.round(bestConfidence * 100) / 100,
+        source: "author/branch/commit-signals",
+    };
+}
+async function detectPrProvenance(prNumber, token) {
+    try {
+        const octokit = getOctokit(token);
+        const { owner, repo } = github_context.repo;
+        const [{ data: pr }, { data: commits }] = await Promise.all([
+            octokit.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+            }),
+            octokit.rest.pulls.listCommits({
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 50,
+            }),
+        ]);
+        const signals = [];
+        if (pr.user?.login)
+            signals.push(pr.user.login);
+        if (pr.head?.ref)
+            signals.push(pr.head.ref);
+        for (const commit of commits) {
+            if (commit.author?.login)
+                signals.push(commit.author.login);
+            if (commit.commit?.author?.name)
+                signals.push(commit.commit.author.name);
+            if (commit.commit?.author?.email)
+                signals.push(commit.commit.author.email);
+            if (commit.committer?.login)
+                signals.push(commit.committer.login);
+        }
+        if (signals.length === 0) {
+            return { type: "unknown", confidence: 0.2, source: "insufficient-signals" };
+        }
+        return classifyFromSignals(signals);
+    }
+    catch (error) {
+        core.debug(`Failed to detect PR provenance: ${error}`);
+        return null;
+    }
+}
+function detectCiIntegrityRisk(files) {
+    const blockingPatterns = [];
+    const warningSignals = [];
+    let score = 0;
+    const workflowFiles = files.filter((f) => f.filename.startsWith(".github/workflows/"));
+    const testFiles = files.filter((f) => /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/.test(f.filename));
+    for (const file of workflowFiles) {
+        const patch = file.patch ?? "";
+        if (/\|\|\s*true/.test(patch)) {
+            blockingPatterns.push(`${file.filename}: workflow bypass pattern "|| true"`);
+            score += 45;
+        }
+        if (/^\+\s*continue-on-error:\s*true\b/m.test(patch)) {
+            blockingPatterns.push(`${file.filename}: introduced "continue-on-error: true"`);
+            score += 45;
+        }
+        if (/^\+\s*if:\s*\$\{\{\s*always\(\)\s*\}\}/m.test(patch)) {
+            warningSignals.push(`${file.filename}: always() condition added to workflow gate`);
+            score += 20;
+        }
+    }
+    for (const file of testFiles) {
+        if (file.deletions > file.additions * 2 && file.deletions >= 10) {
+            warningSignals.push(`${file.filename}: heavy test deletion (${file.deletions} deleted / ${file.additions} added)`);
+            score += 25;
+        }
+    }
+    for (const file of files) {
+        const patch = file.patch ?? "";
+        if (!patch)
+            continue;
+        if (/^\-\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch) &&
+            /^\+\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch)) {
+            warningSignals.push(`${file.filename}: coverage threshold definition changed`);
+            score += 20;
+        }
+    }
+    if (score === 0) {
+        return { factor: null, blockingPatterns: [] };
+    }
+    const factor = {
+        type: "ci_integrity",
+        score: Math.min(100, score),
+        detail: {
+            blockingPatterns,
+            warningSignals,
+            description: "CI confidence and workflow integrity signals",
+        },
+    };
+    return { factor, blockingPatterns };
+}
+async function detectSessionCorrelation(params) {
+    const cfg = params.repoConfig?.policies?.session_correlation;
+    if (!cfg?.enabled || !params.prNumber || !params.token || !params.provenance)
+        return null;
+    if (params.provenance.type === "human")
+        return null;
+    try {
+        const octokit = getOctokit(params.token);
+        const { owner, repo } = github_context.repo;
+        const { data: currentPr } = await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: params.prNumber,
+        });
+        const author = currentPr.user?.login;
+        if (!author)
+            return null;
+        const sinceMs = Date.now() - cfg.window_minutes * 60 * 1000;
+        const { data: closedPrs } = await octokit.rest.pulls.list({
+            owner,
+            repo,
+            state: "closed",
+            sort: "updated",
+            direction: "desc",
+            per_page: 100,
+        });
+        const mergedInWindow = closedPrs.filter((pr) => {
+            if (!pr.merged_at)
+                return false;
+            if (pr.user?.login !== author)
+                return false;
+            const mergedAt = Date.parse(pr.merged_at);
+            return !Number.isNaN(mergedAt) && mergedAt >= sinceMs;
+        });
+        return {
+            burstCount: mergedInWindow.length,
+            windowMinutes: cfg.window_minutes,
+        };
+    }
+    catch (error) {
+        core.debug(`Session correlation detection failed: ${error}`);
+        return null;
+    }
+}
+function isAgentProvenanceType(type) {
+    return type !== "human";
+}
+async function enforceAgentPrPolicies(params) {
+    const policy = params.repoConfig?.policies?.agent_prs;
+    if (!policy?.enabled || !params.prNumber || !params.token)
+        return null;
+    const provenanceType = params.provenance?.type ?? "unknown";
+    const isUnknownStrict = provenanceType === "unknown" && policy.strict_on_unknown_provenance;
+    const shouldTreatAsAgent = isUnknownStrict || isAgentProvenanceType(provenanceType);
+    if (!shouldTreatAsAgent)
+        return null;
+    const findings = [];
+    let adjustedRiskThreshold;
+    let forceBlock = false;
+    if (isUnknownStrict) {
+        findings.push("PR provenance is unknown and strict mode is enabled; applying agent PR policy checks.");
+    }
+    if (policy.risk_threshold !== undefined &&
+        policy.risk_threshold < params.currentRiskThreshold) {
+        adjustedRiskThreshold = policy.risk_threshold;
+        findings.push(`Agent PR risk threshold tightened from ${params.currentRiskThreshold} to ${policy.risk_threshold}.`);
+    }
+    const sensitivePatterns = policy.sensitive_paths.length > 0
+        ? policy.sensitive_paths
+        : (params.repoConfig?.sensitivity.high ?? []);
+    const touchesSensitivePaths = params.files.some((f) => sensitivePatterns.length > 0
+        ? matchesGlobs(f.filename, sensitivePatterns)
+        : isSensitiveFile(f.filename)) || params.files.some((f) => isSensitiveFile(f.filename));
+    if (!touchesSensitivePaths) {
+        return { adjustedRiskThreshold, forceBlock, findings };
+    }
+    try {
+        const octokit = getOctokit(params.token);
+        const { owner, repo } = github_context.repo;
+        const { data: reviews } = await octokit.rest.pulls.listReviews({
+            owner,
+            repo,
+            pull_number: params.prNumber,
+            per_page: 100,
+        });
+        const approvedBy = new Set(reviews
+            .filter((r) => r.state === "APPROVED")
+            .map((r) => r.user?.login)
+            .filter((u) => Boolean(u)));
+        if (approvedBy.size < policy.required_approvals) {
+            forceBlock = true;
+            findings.push(`Sensitive-path agent PR requires ${policy.required_approvals} approval(s); found ${approvedBy.size}.`);
+        }
+        if (policy.require_code_owner_approval) {
+            if (policy.code_owner_reviewers.length === 0) {
+                forceBlock = true;
+                findings.push("Code-owner approval required for sensitive-path agent PRs, but no code_owner_reviewers configured.");
+            }
+            else {
+                const hasCodeOwnerApproval = policy.code_owner_reviewers.some((r) => approvedBy.has(r));
+                if (!hasCodeOwnerApproval) {
+                    forceBlock = true;
+                    findings.push(`Sensitive-path agent PR requires one code-owner approval (${policy.code_owner_reviewers.join(", ")}).`);
+                }
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Agent PR policy review check failed: ${error}`);
+        // Fail-open remains the default: do not force block on API errors.
+    }
+    return { adjustedRiskThreshold, forceBlock, findings };
 }
 // ---------------------------------------------------------------------------
 // Health check (HTTP)
@@ -41484,13 +41838,16 @@ async function evaluateGate(config, commitSha, prNumber) {
     if (isMergeQueue) {
         core.info("Merge queue detected — adjusting evaluation (skipping author_history)");
     }
-    const [files, authorFactor, prAgeFactor, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig, securityAlerts,] = await Promise.all([
+    const [files, authorFactor, prAgeFactor, provenance, httpHealthChecks, vercelCheck, supabaseCheck, mcpCheck, repoConfig, securityAlerts,] = await Promise.all([
         prNumber ? fetchPrFiles(prNumber, config.githubToken) : Promise.resolve([]),
         prNumber && config.githubToken && !isMergeQueue
             ? computeAuthorHistory(prNumber, config.githubToken)
             : Promise.resolve(null),
         prNumber && config.githubToken
             ? computePrAge(prNumber, config.githubToken)
+            : Promise.resolve(null),
+        prNumber && config.githubToken
+            ? detectPrProvenance(prNumber, config.githubToken)
             : Promise.resolve(null),
         config.healthCheckUrls.length > 0
             ? Promise.all(config.healthCheckUrls.map((url) => checkHealth(url)))
@@ -41508,6 +41865,8 @@ async function evaluateGate(config, commitSha, prNumber) {
         : undefined;
     const effectiveRiskThreshold = envConfig?.risk ?? repoConfig?.thresholds.risk ?? config.riskThreshold;
     const effectiveWarnThreshold = envConfig?.warn ?? repoConfig?.thresholds.warn ?? config.warnThreshold;
+    let adjustedRiskThreshold = effectiveRiskThreshold;
+    const policyFindings = [];
     const freezeCheck = isInFreezeWindow(repoConfig?.freeze ?? []);
     if (freezeCheck.frozen) {
         core.warning(`Release freeze active: ${freezeCheck.message}`);
@@ -41526,9 +41885,46 @@ async function evaluateGate(config, commitSha, prNumber) {
             riskFactors.push(secFactor);
     }
     const customWeights = repoConfig?.weights ?? {};
+    const ciIntegrityConfig = repoConfig?.policies?.ci_integrity;
+    const ciIntegrity = ciIntegrityConfig?.enabled === false
+        ? { factor: null, blockingPatterns: [] }
+        : detectCiIntegrityRisk(files);
+    if (ciIntegrity.factor) {
+        riskFactors.push(ciIntegrity.factor);
+    }
     const riskScore = riskFactors.length > 0
         ? weightedAverageScores(riskFactors, customWeights)
         : localRiskScore;
+    const agentPolicy = await enforceAgentPrPolicies({
+        prNumber,
+        token: config.githubToken,
+        files,
+        repoConfig,
+        provenance,
+        currentRiskThreshold: adjustedRiskThreshold,
+    });
+    if (agentPolicy?.adjustedRiskThreshold !== undefined) {
+        adjustedRiskThreshold = agentPolicy.adjustedRiskThreshold;
+    }
+    if (agentPolicy?.findings.length) {
+        policyFindings.push(...agentPolicy.findings);
+    }
+    const sessionCorrelation = await detectSessionCorrelation({
+        prNumber,
+        token: config.githubToken,
+        provenance,
+        repoConfig,
+    });
+    const sessionCfg = repoConfig?.policies?.session_correlation;
+    if (sessionCorrelation && sessionCfg) {
+        const threshold = sessionCfg.threshold;
+        if (sessionCorrelation.burstCount >= threshold) {
+            policyFindings.push(`Rapid-fire merge burst detected: ${sessionCorrelation.burstCount} merged PRs in ${sessionCorrelation.windowMinutes} minutes.`);
+            if (sessionCfg.mode === "block") {
+                policyFindings.push("Session correlation policy is configured to block.");
+            }
+        }
+    }
     const healthChecks = [...httpHealthChecks];
     if (vercelCheck)
         healthChecks.push(vercelCheck);
@@ -41537,9 +41933,21 @@ async function evaluateGate(config, commitSha, prNumber) {
     if (mcpCheck)
         healthChecks.push(mcpCheck);
     const healthScore = aggregateHealthScore(healthChecks);
-    const gateDecision = freezeCheck.frozen
+    const baselineDecision = freezeCheck.frozen
         ? "block"
-        : decideGate(riskScore, healthScore, effectiveRiskThreshold, effectiveWarnThreshold);
+        : decideGate(riskScore, healthScore, adjustedRiskThreshold, effectiveWarnThreshold);
+    const gateDecision = agentPolicy?.forceBlock === true ||
+        (ciIntegrity.blockingPatterns.length > 0 &&
+            (ciIntegrityConfig?.mode ?? "block") === "block") ||
+        (sessionCorrelation &&
+            sessionCfg &&
+            sessionCorrelation.burstCount >= sessionCfg.threshold &&
+            sessionCfg.mode === "block")
+        ? "block"
+        : baselineDecision;
+    if (ciIntegrity.blockingPatterns.length > 0) {
+        policyFindings.push(`CI integrity blocking patterns detected (${ciIntegrity.blockingPatterns.length}).`);
+    }
     const fileNames = files.map((f) => f.filename);
     let localEvaluation = {
         id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
@@ -41554,6 +41962,23 @@ async function evaluateGate(config, commitSha, prNumber) {
         files: fileNames.length > 0 ? fileNames : undefined,
         evaluationMs: Date.now() - start,
         environment: config.environment,
+        policyFindings: policyFindings.length > 0 ? policyFindings : undefined,
+        pr: prNumber
+            ? {
+                provenance: provenance ??
+                    {
+                        type: "unknown",
+                        confidence: 0.2,
+                        source: "not-detected",
+                    },
+            }
+            : undefined,
+        session_correlation: sessionCorrelation && sessionCorrelation.burstCount > 0
+            ? {
+                burst_count: sessionCorrelation.burstCount,
+                window: `${sessionCorrelation.windowMinutes}m`,
+            }
+            : undefined,
     };
     if (config.apiKey) {
         const apiResponse = await callGateApi(config, localEvaluation);
@@ -41913,6 +42338,21 @@ function formatGateReport(evaluation, riskThreshold) {
     ];
     if (riskThreshold !== undefined) {
         lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
+    }
+    if (evaluation.pr?.provenance) {
+        lines.push(`### PR Provenance`, ``, `- Type: \`${evaluation.pr.provenance.type}\``, `- Confidence: \`${evaluation.pr.provenance.confidence}\``, ...(evaluation.pr.provenance.source
+            ? [`- Source: ${evaluation.pr.provenance.source}`]
+            : []), ``);
+    }
+    if (evaluation.session_correlation) {
+        lines.push(`### Session Correlation`, ``, `- Burst count: \`${evaluation.session_correlation.burst_count}\``, `- Window: \`${evaluation.session_correlation.window}\``, ``);
+    }
+    if (evaluation.policyFindings && evaluation.policyFindings.length > 0) {
+        lines.push(`### Policy Findings`, ``);
+        for (const finding of evaluation.policyFindings) {
+            lines.push(`- ${finding}`);
+        }
+        lines.push(``);
     }
     if (evaluation.policyOverride) {
         const override = evaluation.policyOverride;

@@ -23,11 +23,27 @@ export const RiskFactor = z.object({
     "security_alerts",
     "deployment_history",
     "canary_status",
+    "ci_integrity",
   ]),
   score: z.number().min(0).max(100),
   detail: z.record(z.unknown()).optional(),
 });
 export type RiskFactor = z.infer<typeof RiskFactor>;
+
+export const PrProvenance = z.object({
+  type: z.enum([
+    "human",
+    "dependabot",
+    "copilot",
+    "codex",
+    "claude",
+    "custom-bot",
+    "unknown",
+  ]),
+  confidence: z.number().min(0).max(1),
+  source: z.string().optional(),
+});
+export type PrProvenance = z.infer<typeof PrProvenance>;
 
 export const GateEvaluation = z.object({
   id: z.string(),
@@ -44,6 +60,18 @@ export const GateEvaluation = z.object({
   reportUrl: z.string().url().optional(),
   environment: z.string().optional(),
   service: z.string().optional(),
+  policyFindings: z.array(z.string()).optional(),
+  pr: z
+    .object({
+      provenance: PrProvenance.optional(),
+    })
+    .optional(),
+  session_correlation: z
+    .object({
+      burst_count: z.number().int().min(0),
+      window: z.string(),
+    })
+    .optional(),
   policyOverride: z
     .object({
       owner: z.string(),
@@ -111,6 +139,7 @@ export const CanaryConfig = z.object({
 export type CanaryConfig = z.infer<typeof CanaryConfig>;
 
 export const RepoConfig = z.object({
+  schema_version: z.number().int().positive().default(1),
   sensitivity: z
     .object({
       high: z.array(z.string()).default([]),
@@ -131,6 +160,35 @@ export const RepoConfig = z.object({
   services: z.record(ServiceMapping).default({}),
   security: SecurityConfig.default({}),
   canary: CanaryConfig.optional(),
+  policies: z
+    .object({
+      agent_prs: z
+        .object({
+          enabled: z.boolean().default(false),
+          risk_threshold: z.number().min(0).max(100).optional(),
+          required_approvals: z.number().int().min(0).default(1),
+          require_code_owner_approval: z.boolean().default(false),
+          code_owner_reviewers: z.array(z.string()).default([]),
+          sensitive_paths: z.array(z.string()).default([]),
+          strict_on_unknown_provenance: z.boolean().default(true),
+        })
+        .default({}),
+      session_correlation: z
+        .object({
+          enabled: z.boolean().default(false),
+          threshold: z.number().int().min(2).default(3),
+          window_minutes: z.number().int().min(5).default(60),
+          mode: z.enum(["warn", "block"]).default("warn"),
+        })
+        .default({}),
+      ci_integrity: z
+        .object({
+          enabled: z.boolean().default(true),
+          mode: z.enum(["warn", "block"]).default("block"),
+        })
+        .default({}),
+    })
+    .default({}),
 });
 export type RepoConfig = z.infer<typeof RepoConfig>;
 
