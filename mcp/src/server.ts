@@ -40,6 +40,164 @@ function jsonResult(data: unknown): ToolReturn {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
 
+type ProvenanceType =
+  | "human"
+  | "dependabot"
+  | "copilot"
+  | "codex"
+  | "claude"
+  | "custom-bot"
+  | "unknown";
+
+function classifyProvenanceSignals(signals: string[]): {
+  type: ProvenanceType;
+  confidence: number;
+} {
+  const text = signals.join(" ").toLowerCase();
+  const candidates: Record<ProvenanceType, number> = {
+    human: 0.55,
+    dependabot: 0,
+    copilot: 0,
+    codex: 0,
+    claude: 0,
+    "custom-bot": 0,
+    unknown: 0.25,
+  };
+
+  if (/\[bot\]/.test(text))
+    candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.8);
+  if (/dependabot/.test(text)) candidates.dependabot = 0.99;
+  if (/copilot/.test(text)) candidates.copilot = Math.max(candidates.copilot, 0.93);
+  if (/\bclaude\b|anthropic/.test(text))
+    candidates.claude = Math.max(candidates.claude, 0.92);
+  if (/\bcodex\b|\bopenai\b/.test(text))
+    candidates.codex = Math.max(candidates.codex, 0.9);
+  if (/^cursor\/| cursor\//.test(text))
+    candidates.codex = Math.max(candidates.codex, 0.82);
+  if (/^agent\/| agent\//.test(text)) {
+    candidates["custom-bot"] = Math.max(candidates["custom-bot"], 0.86);
+  }
+
+  let bestType: ProvenanceType = "unknown";
+  let bestConfidence = 0;
+  for (const [type, confidence] of Object.entries(candidates) as Array<
+    [ProvenanceType, number]
+  >) {
+    if (confidence > bestConfidence) {
+      bestType = type;
+      bestConfidence = confidence;
+    }
+  }
+
+  return {
+    type: bestType,
+    confidence: Math.round(bestConfidence * 100) / 100,
+  };
+}
+
+function detectCiIntegrity(
+  files: Array<{
+    filename: string;
+    additions?: number;
+    deletions?: number;
+    patch?: string;
+  }>,
+): { score: number; blockingPatterns: string[]; warningSignals: string[] } {
+  const blockingPatterns: string[] = [];
+  const warningSignals: string[] = [];
+  let score = 0;
+
+  for (const file of files.filter((f) => f.filename.startsWith(".github/workflows/"))) {
+    const patch = file.patch ?? "";
+    if (/\|\|\s*true/.test(patch)) {
+      blockingPatterns.push(`${file.filename}: workflow bypass pattern "|| true"`);
+      score += 45;
+    }
+    if (/^\+\s*continue-on-error:\s*true\b/m.test(patch)) {
+      blockingPatterns.push(`${file.filename}: introduced "continue-on-error: true"`);
+      score += 45;
+    }
+    if (/^\+\s*if:\s*\$\{\{\s*always\(\)\s*\}\}/m.test(patch)) {
+      warningSignals.push(`${file.filename}: always() condition added to workflow gate`);
+      score += 20;
+    }
+  }
+
+  for (const file of files.filter((f) =>
+    /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\/|\.cy\.(ts|js)$/.test(f.filename),
+  )) {
+    const additions = file.additions ?? 0;
+    const deletions = file.deletions ?? 0;
+    if (deletions > additions * 2 && deletions >= 10) {
+      warningSignals.push(
+        `${file.filename}: heavy test deletion (${deletions} deleted / ${additions} added)`,
+      );
+      score += 25;
+    }
+  }
+
+  return {
+    score: Math.min(100, score),
+    blockingPatterns,
+    warningSignals,
+  };
+}
+
+function detectSupplyChain(files: Array<{ filename: string; patch?: string }>): {
+  score: number;
+  criticalVulnDetected: boolean;
+  blockingPatterns: string[];
+  warnings: string[];
+} {
+  const blockingPatterns: string[] = [];
+  const warnings: string[] = [];
+  let score = 0;
+  let criticalVulnDetected = false;
+
+  for (const file of files.filter((f) =>
+    /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|poetry\.lock|Pipfile|Pipfile\.lock)$/.test(
+      f.filename,
+    ),
+  )) {
+    const patch = file.patch ?? "";
+    if (!patch) continue;
+
+    const newPackageLines = patch.match(/^\+\s*"(@?[\w.-]+)"\s*:\s*"[^"]+"/gm) ?? [];
+    if (newPackageLines.length > 0) {
+      score += Math.min(25, newPackageLines.length * 5);
+      warnings.push(
+        `${file.filename}: ${newPackageLines.length} new dependency declaration(s)`,
+      );
+    }
+
+    const majorBumpRegex =
+      /^\-\s*"(@?[\w.-]+)"\s*:\s*"\^?(\d+)\.[^"]*"\n\+\s*"\1"\s*:\s*"\^?(\d+)\./gm;
+    for (const match of patch.matchAll(majorBumpRegex)) {
+      const prevMajor = Number(match[2]);
+      const nextMajor = Number(match[3]);
+      if (nextMajor > prevMajor) {
+        score += 15;
+        warnings.push(
+          `${file.filename}: major version jump for ${match[1]} (${prevMajor} -> ${nextMajor})`,
+        );
+      }
+    }
+
+    if (/CVE-\d{4}-\d+/i.test(patch) && /(critical|severity:\s*critical)/i.test(patch)) {
+      criticalVulnDetected = true;
+      blockingPatterns.push(`${file.filename}: critical vulnerability marker detected`);
+      score += 50;
+    }
+  }
+
+  return {
+    score: Math.min(100, score),
+    criticalVulnDetected,
+    blockingPatterns,
+    warnings,
+  };
+}
+
 const server = new McpServer({
   name: "trailhead",
   version: "4.1.0",
@@ -246,6 +404,99 @@ server.tool(
     const { score, factors } = computeRiskScore(files as FileInfo[]);
     const decision = decideGate(score, 100, 70, 55);
     return jsonResult({ score, factors, decision });
+  },
+);
+
+server.tool(
+  "detect-provenance",
+  "Classify PR provenance from author, branch, and commit metadata signals.",
+  {
+    author: z.string().optional().describe("Primary PR author login or name"),
+    branch: z.string().optional().describe("PR branch name"),
+    commitAuthors: z
+      .array(z.string())
+      .default([])
+      .describe("Commit author names/emails/logins"),
+    extraSignals: z.array(z.string()).default([]).describe("Additional provenance hints"),
+  },
+  async ({ author, branch, commitAuthors, extraSignals }): Promise<ToolReturn> => {
+    const signals = [
+      ...(author ? [author] : []),
+      ...(branch ? [branch] : []),
+      ...commitAuthors,
+      ...extraSignals,
+    ].filter(Boolean);
+
+    if (signals.length === 0) {
+      return jsonResult({
+        provenance: { type: "unknown", confidence: 0.2 },
+        source: "insufficient-signals",
+      });
+    }
+
+    const classification = classifyProvenanceSignals(signals);
+    return jsonResult({
+      provenance: classification,
+      source: "author/branch/commit-signals",
+      signalsAnalyzed: signals.length,
+    });
+  },
+);
+
+server.tool(
+  "check-ci-integrity",
+  "Check CI integrity risks such as workflow bypass patterns and heavy test deletion.",
+  {
+    files: z
+      .array(
+        z.object({
+          filename: z.string(),
+          additions: z.number().int().min(0).optional(),
+          deletions: z.number().int().min(0).optional(),
+          patch: z.string().optional(),
+        }),
+      )
+      .default([]),
+  },
+  async ({ files }): Promise<ToolReturn> => {
+    const result = detectCiIntegrity(files);
+    return jsonResult({
+      factor: {
+        type: "ci_integrity",
+        score: result.score,
+      },
+      blockingPatterns: result.blockingPatterns,
+      warningSignals: result.warningSignals,
+      shouldBlock: result.blockingPatterns.length > 0,
+    });
+  },
+);
+
+server.tool(
+  "check-supply-chain",
+  "Evaluate dependency diffs for supply-chain risks (new packages, major bumps, critical markers).",
+  {
+    files: z
+      .array(
+        z.object({
+          filename: z.string(),
+          patch: z.string().optional(),
+        }),
+      )
+      .default([]),
+  },
+  async ({ files }): Promise<ToolReturn> => {
+    const result = detectSupplyChain(files);
+    return jsonResult({
+      factor: {
+        type: "supply_chain",
+        score: result.score,
+      },
+      criticalVulnDetected: result.criticalVulnDetected,
+      blockingPatterns: result.blockingPatterns,
+      warnings: result.warnings,
+      shouldBlock: result.criticalVulnDetected || result.blockingPatterns.length > 0,
+    });
   },
 );
 
@@ -1069,6 +1320,120 @@ server.tool(
   },
 );
 
+server.tool(
+  "query-overrides",
+  "Query governed override records from TRAILHEAD_OVERRIDES_JSON (JSON array path) or TRAILHEAD_OVERRIDES_INLINE.",
+  {
+    repo: z.string().optional().describe("Filter by repository id"),
+    environment: z.string().optional().describe("Filter by environment"),
+    from: z.string().optional().describe("Filter records on/after this ISO timestamp"),
+    to: z.string().optional().describe("Filter records on/before this ISO timestamp"),
+  },
+  async ({ repo, environment, from, to }): Promise<ToolReturn> => {
+    const fs = await import("node:fs/promises");
+    const sourcePath = process.env.TRAILHEAD_OVERRIDES_JSON;
+    const inline = process.env.TRAILHEAD_OVERRIDES_INLINE;
+
+    let records: Array<Record<string, unknown>> = [];
+    try {
+      if (sourcePath) {
+        const raw = await fs.readFile(sourcePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) records = parsed;
+      } else if (inline) {
+        const parsed = JSON.parse(inline);
+        if (Array.isArray(parsed)) records = parsed;
+      } else {
+        return jsonResult({
+          error:
+            "No override source configured. Set TRAILHEAD_OVERRIDES_JSON or TRAILHEAD_OVERRIDES_INLINE.",
+        });
+      }
+    } catch (error) {
+      return jsonResult({ error: `Failed to load override records: ${String(error)}` });
+    }
+
+    const fromMs = from ? Date.parse(from) : undefined;
+    const toMs = to ? Date.parse(to) : undefined;
+
+    const filtered = records.filter((r) => {
+      const repoMatch = !repo || r["repoId"] === repo || r["repo"] === repo;
+      const envMatch = !environment || r["environment"] === environment;
+      const tsRaw = (r["appliedAt"] ?? r["createdAt"] ?? r["timestamp"]) as
+        | string
+        | undefined;
+      const ts = tsRaw ? Date.parse(tsRaw) : undefined;
+      const fromMatch =
+        fromMs === undefined || (ts !== undefined && !Number.isNaN(ts) && ts >= fromMs);
+      const toMatch =
+        toMs === undefined || (ts !== undefined && !Number.isNaN(ts) && ts <= toMs);
+      return repoMatch && envMatch && fromMatch && toMatch;
+    });
+
+    return jsonResult({
+      total: filtered.length,
+      records: filtered,
+    });
+  },
+);
+
+server.tool(
+  "get-escalation-status",
+  "Evaluate escalation SLA status for a blocked PR or deployment incident.",
+  {
+    blockedAt: z.string().describe("ISO timestamp when block started"),
+    acknowledgedAt: z
+      .string()
+      .optional()
+      .describe("ISO timestamp of first acknowledgement"),
+    resolvedAt: z.string().optional().describe("ISO timestamp of resolution"),
+    acknowledgeSlaMinutes: z.number().int().min(1).default(30),
+    resolveSlaMinutes: z.number().int().min(1).default(240),
+    now: z.string().optional().describe("Optional ISO timestamp override for evaluation"),
+  },
+  async ({
+    blockedAt,
+    acknowledgedAt,
+    resolvedAt,
+    acknowledgeSlaMinutes,
+    resolveSlaMinutes,
+    now,
+  }): Promise<ToolReturn> => {
+    const blockedMs = Date.parse(blockedAt);
+    if (Number.isNaN(blockedMs)) {
+      return jsonResult({ error: "blockedAt must be a valid ISO timestamp" });
+    }
+    const nowMs = now ? Date.parse(now) : Date.now();
+    if (Number.isNaN(nowMs)) {
+      return jsonResult({ error: "now must be a valid ISO timestamp when provided" });
+    }
+
+    const ackMs = acknowledgedAt ? Date.parse(acknowledgedAt) : undefined;
+    const resolvedMs = resolvedAt ? Date.parse(resolvedAt) : undefined;
+    const ackDeadline = blockedMs + acknowledgeSlaMinutes * 60 * 1000;
+    const resolveDeadline = blockedMs + resolveSlaMinutes * 60 * 1000;
+
+    const ackOverdue = ackMs ? ackMs > ackDeadline : nowMs > ackDeadline;
+    const resolveOverdue = resolvedMs
+      ? resolvedMs > resolveDeadline
+      : nowMs > resolveDeadline;
+
+    const status = resolvedMs ? "resolved" : ackMs ? "acknowledged" : "unacknowledged";
+
+    return jsonResult({
+      status,
+      blockedAt,
+      acknowledgedAt: acknowledgedAt ?? null,
+      resolvedAt: resolvedAt ?? null,
+      acknowledgeSlaMinutes,
+      resolveSlaMinutes,
+      acknowledgeOverdue: ackOverdue,
+      resolveOverdue: resolveOverdue,
+      overall: ackOverdue || resolveOverdue ? "breached" : "within_sla",
+    });
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Health Resource — trailhead://health (DG9: cached aggregate health)
 // ---------------------------------------------------------------------------
@@ -1154,6 +1519,9 @@ server.resource(
               "check-vercel-health",
               "check-supabase-health",
               "compute-risk-score",
+              "detect-provenance",
+              "check-ci-integrity",
+              "check-supply-chain",
               "evaluate-deployment",
               "get-dora-metrics",
               "compare-risk-history",
@@ -1162,6 +1530,8 @@ server.resource(
               "get-security-alerts",
               "get-deployment-status",
               "suggest-deploy-timing",
+              "query-overrides",
+              "get-escalation-status",
             ],
             resources: ["trailhead://health", "trailhead://server-card"],
             adapters: ["vercel", "supabase", "aws-ecs", "fly-io", "cloudflare"],

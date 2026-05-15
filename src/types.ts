@@ -24,6 +24,12 @@ export const RiskFactor = z.object({
     "deployment_history",
     "canary_status",
     "ci_integrity",
+    "workflow_security",
+    "prompt_injection_risk",
+    "supply_chain",
+    "pr_scope",
+    "duplicate_logic",
+    "cross_repo_impact",
   ]),
   score: z.number().min(0).max(100),
   detail: z.record(z.unknown()).optional(),
@@ -185,6 +191,26 @@ export const RepoConfig = z.object({
         .object({
           enabled: z.boolean().default(true),
           mode: z.enum(["warn", "block"]).default("block"),
+        })
+        .default({}),
+      workflow_security: z
+        .object({
+          enabled: z.boolean().default(true),
+          mode: z.enum(["warn", "block"]).default("block"),
+          allow_unpinned_actions: z.array(z.string()).default([]),
+        })
+        .default({}),
+      prompt_injection: z
+        .object({
+          enabled: z.boolean().default(true),
+          mode: z.enum(["warn", "block"]).default("block"),
+        })
+        .default({}),
+      supply_chain: z
+        .object({
+          enabled: z.boolean().default(true),
+          mode: z.enum(["warn", "block"]).default("warn"),
+          force_score_on_critical: z.number().min(0).max(100).default(80),
         })
         .default({}),
     })

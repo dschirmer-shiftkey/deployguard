@@ -104,6 +104,13 @@ export const FACTOR_WEIGHTS: Record<string, number> = {
   security_alerts: 4,
   deployment_history: 2,
   canary_status: 2,
+  ci_integrity: 3,
+  workflow_security: 4,
+  prompt_injection_risk: 4,
+  supply_chain: 3,
+  pr_scope: 2,
+  duplicate_logic: 1,
+  cross_repo_impact: 2,
 };
 
 // ---------------------------------------------------------------------------

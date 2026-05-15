@@ -40292,6 +40292,12 @@ const RiskFactor = objectType({
         "deployment_history",
         "canary_status",
         "ci_integrity",
+        "workflow_security",
+        "prompt_injection_risk",
+        "supply_chain",
+        "pr_scope",
+        "duplicate_logic",
+        "cross_repo_impact",
     ]),
     score: numberType().min(0).max(100),
     detail: recordType(unknownType()).optional(),
@@ -40427,6 +40433,23 @@ const RepoConfig = objectType({
             mode: enumType(["warn", "block"]).default("block"),
         })
             .default({}),
+        workflow_security: objectType({
+            enabled: booleanType().default(true),
+            mode: enumType(["warn", "block"]).default("block"),
+            allow_unpinned_actions: arrayType(stringType()).default([]),
+        })
+            .default({}),
+        prompt_injection: objectType({
+            enabled: booleanType().default(true),
+            mode: enumType(["warn", "block"]).default("block"),
+        })
+            .default({}),
+        supply_chain: objectType({
+            enabled: booleanType().default(true),
+            mode: enumType(["warn", "block"]).default("warn"),
+            force_score_on_critical: numberType().min(0).max(100).default(80),
+        })
+            .default({}),
     })
         .default({}),
 });
@@ -40486,6 +40509,13 @@ const FACTOR_WEIGHTS = {
     security_alerts: 4,
     deployment_history: 2,
     canary_status: 2,
+    ci_integrity: 3,
+    workflow_security: 4,
+    prompt_injection_risk: 4,
+    supply_chain: 3,
+    pr_scope: 2,
+    duplicate_logic: 1,
+    cross_repo_impact: 2,
 };
 // ---------------------------------------------------------------------------
 // Glob matching
@@ -41462,6 +41492,150 @@ function detectCiIntegrityRisk(files) {
     };
     return { factor, blockingPatterns };
 }
+function detectWorkflowSecurityRisk(files, allowUnpinnedActions) {
+    const blockingPatterns = [];
+    const warnings = [];
+    let score = 0;
+    const workflowFiles = files.filter((f) => f.filename.startsWith(".github/workflows/"));
+    for (const file of workflowFiles) {
+        const patch = file.patch ?? "";
+        if (!patch)
+            continue;
+        if (/^\+\s*permissions:\s*write-all\b/m.test(patch)) {
+            blockingPatterns.push(`${file.filename}: introduced over-privileged permissions write-all`);
+            score += 55;
+        }
+        const actionRefMatches = patch.matchAll(/^\+\s*uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@([^\s#]+)\s*$/gm);
+        for (const match of actionRefMatches) {
+            const action = match[1];
+            const ref = match[2];
+            const isPinnedSha = /^[a-f0-9]{40}$/i.test(ref);
+            const allowListed = allowUnpinnedActions.includes(action);
+            if (!isPinnedSha && !allowListed) {
+                warnings.push(`${file.filename}: unpinned third-party action ${action}@${ref}`);
+                score += 20;
+            }
+        }
+        if (/^\+\s*run:\s*.*\$\{\{\s*github\.event\.[^}]+\}\}/m.test(patch)) {
+            warnings.push(`${file.filename}: untrusted event data interpolated into shell run step`);
+            score += 25;
+        }
+    }
+    if (score === 0) {
+        return { factor: null, blockingPatterns: [], warnings: [] };
+    }
+    return {
+        factor: {
+            type: "workflow_security",
+            score: Math.min(100, score),
+            detail: {
+                blockingPatterns,
+                warnings,
+                description: "Workflow security lint signals",
+            },
+        },
+        blockingPatterns,
+        warnings,
+    };
+}
+function detectPromptInjectionRisk(files) {
+    const blockingPatterns = [];
+    const warnings = [];
+    let score = 0;
+    for (const file of files) {
+        const patch = file.patch ?? "";
+        if (!patch)
+            continue;
+        if (/^\+\s*.*(exec|spawn|execa)\([^)]*(req\.(body|query|params)|context\.payload|userInput)/m.test(patch)) {
+            blockingPatterns.push(`${file.filename}: untrusted input appears to flow into command execution`);
+            score += 60;
+        }
+        if (/^\+\s*.*(callLLM|sendMessage|generateContent)\([^)]*(req\.(body|query|params)|userInput)/m.test(patch) &&
+            !/sanitizeForPrompt\(/.test(patch)) {
+            blockingPatterns.push(`${file.filename}: untrusted input used in prompt call without sanitizeForPrompt()`);
+            score += 60;
+        }
+        if (/^\+\s*.*(callLLM|sendMessage|generateContent)\(/m.test(patch) &&
+            !/sanitizeForPrompt\(/.test(patch)) {
+            warnings.push(`${file.filename}: prompt call added; verify sanitization and escaping`);
+            score += 20;
+        }
+    }
+    if (score === 0) {
+        return { factor: null, blockingPatterns: [], warnings: [] };
+    }
+    return {
+        factor: {
+            type: "prompt_injection_risk",
+            score: Math.min(100, score),
+            detail: {
+                blockingPatterns,
+                warnings,
+                description: "Prompt/command injection risk signals",
+            },
+        },
+        blockingPatterns,
+        warnings,
+    };
+}
+function detectSupplyChainRisk(files) {
+    const blockingPatterns = [];
+    const warnings = [];
+    let score = 0;
+    let criticalVulnDetected = false;
+    const dependencyFiles = files.filter((f) => /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|poetry\.lock|Pipfile|Pipfile\.lock)$/.test(f.filename));
+    for (const file of dependencyFiles) {
+        const patch = file.patch ?? "";
+        if (!patch)
+            continue;
+        const newPackageLines = patch.match(/^\+\s*"(@?[\w.-]+)"\s*:\s*"[^"]+"/gm) ?? [];
+        if (newPackageLines.length > 0) {
+            score += Math.min(25, newPackageLines.length * 5);
+            warnings.push(`${file.filename}: ${newPackageLines.length} new dependency declaration(s) added`);
+        }
+        const majorBumpRegex = /^\-\s*"(@?[\w.-]+)"\s*:\s*"\^?(\d+)\.[^"]*"\n\+\s*"\1"\s*:\s*"\^?(\d+)\./gm;
+        for (const match of patch.matchAll(majorBumpRegex)) {
+            const prevMajor = Number(match[2]);
+            const nextMajor = Number(match[3]);
+            if (nextMajor > prevMajor) {
+                score += 15;
+                warnings.push(`${file.filename}: major version jump detected for ${match[1]} (${prevMajor} -> ${nextMajor})`);
+            }
+        }
+        if (/^\+\s*"?(@?[\w.-]+)-\1"?\s*:/m.test(patch)) {
+            warnings.push(`${file.filename}: suspicious repeated package token (possible typosquat)`);
+            score += 20;
+        }
+        if (/CVE-\d{4}-\d+/i.test(patch) && /(critical|severity:\s*critical)/i.test(patch)) {
+            criticalVulnDetected = true;
+            blockingPatterns.push(`${file.filename}: critical vulnerability marker detected in diff`);
+            score += 50;
+        }
+    }
+    if (score === 0) {
+        return {
+            factor: null,
+            blockingPatterns: [],
+            warnings: [],
+            criticalVulnDetected: false,
+        };
+    }
+    return {
+        factor: {
+            type: "supply_chain",
+            score: Math.min(100, score),
+            detail: {
+                blockingPatterns,
+                warnings,
+                criticalVulnDetected,
+                description: "Supply chain risk signals from dependency changes",
+            },
+        },
+        blockingPatterns,
+        warnings,
+        criticalVulnDetected,
+    };
+}
 async function detectSessionCorrelation(params) {
     const cfg = params.repoConfig?.policies?.session_correlation;
     if (!cfg?.enabled || !params.prNumber || !params.token || !params.provenance)
@@ -41892,6 +42066,40 @@ async function evaluateGate(config, commitSha, prNumber) {
     if (ciIntegrity.factor) {
         riskFactors.push(ciIntegrity.factor);
     }
+    const workflowSecurityConfig = repoConfig?.policies?.workflow_security;
+    const workflowSecurity = workflowSecurityConfig?.enabled === false
+        ? { factor: null, blockingPatterns: [], warnings: [] }
+        : detectWorkflowSecurityRisk(files, workflowSecurityConfig?.allow_unpinned_actions ?? []);
+    if (workflowSecurity.factor) {
+        riskFactors.push(workflowSecurity.factor);
+    }
+    const promptInjectionConfig = repoConfig?.policies?.prompt_injection;
+    const promptInjection = promptInjectionConfig?.enabled === false
+        ? { factor: null, blockingPatterns: [], warnings: [] }
+        : detectPromptInjectionRisk(files);
+    if (promptInjection.factor) {
+        riskFactors.push(promptInjection.factor);
+    }
+    const supplyChainConfig = repoConfig?.policies?.supply_chain;
+    const supplyChain = supplyChainConfig?.enabled === false
+        ? {
+            factor: null,
+            blockingPatterns: [],
+            warnings: [],
+            criticalVulnDetected: false,
+        }
+        : detectSupplyChainRisk(files);
+    if (supplyChain.factor) {
+        if (supplyChain.criticalVulnDetected &&
+            supplyChain.factor.score < (supplyChainConfig?.force_score_on_critical ?? 80)) {
+            supplyChain.factor.score = supplyChainConfig?.force_score_on_critical ?? 80;
+            supplyChain.factor.detail = {
+                ...supplyChain.factor.detail,
+                critical_floor_applied: supplyChain.factor.score,
+            };
+        }
+        riskFactors.push(supplyChain.factor);
+    }
     const riskScore = riskFactors.length > 0
         ? weightedAverageScores(riskFactors, customWeights)
         : localRiskScore;
@@ -41939,6 +42147,12 @@ async function evaluateGate(config, commitSha, prNumber) {
     const gateDecision = agentPolicy?.forceBlock === true ||
         (ciIntegrity.blockingPatterns.length > 0 &&
             (ciIntegrityConfig?.mode ?? "block") === "block") ||
+        (workflowSecurity.blockingPatterns.length > 0 &&
+            (workflowSecurityConfig?.mode ?? "block") === "block") ||
+        (promptInjection.blockingPatterns.length > 0 &&
+            (promptInjectionConfig?.mode ?? "block") === "block") ||
+        ((supplyChain.blockingPatterns.length > 0 || supplyChain.criticalVulnDetected) &&
+            (supplyChainConfig?.mode ?? "warn") === "block") ||
         (sessionCorrelation &&
             sessionCfg &&
             sessionCorrelation.burstCount >= sessionCfg.threshold &&
@@ -41947,6 +42161,24 @@ async function evaluateGate(config, commitSha, prNumber) {
         : baselineDecision;
     if (ciIntegrity.blockingPatterns.length > 0) {
         policyFindings.push(`CI integrity blocking patterns detected (${ciIntegrity.blockingPatterns.length}).`);
+    }
+    if (workflowSecurity.blockingPatterns.length > 0) {
+        policyFindings.push(`Workflow security blocking patterns detected (${workflowSecurity.blockingPatterns.length}).`);
+    }
+    if (workflowSecurity.warnings.length > 0) {
+        policyFindings.push(`Workflow security warnings detected (${workflowSecurity.warnings.length}).`);
+    }
+    if (promptInjection.blockingPatterns.length > 0) {
+        policyFindings.push(`Prompt/command injection blocking patterns detected (${promptInjection.blockingPatterns.length}).`);
+    }
+    if (promptInjection.warnings.length > 0) {
+        policyFindings.push(`Prompt/command injection warnings detected (${promptInjection.warnings.length}).`);
+    }
+    if (supplyChain.blockingPatterns.length > 0) {
+        policyFindings.push(`Supply-chain blocking patterns detected (${supplyChain.blockingPatterns.length}).`);
+    }
+    if (supplyChain.warnings.length > 0) {
+        policyFindings.push(`Supply-chain warnings detected (${supplyChain.warnings.length}).`);
     }
     const fileNames = files.map((f) => f.filename);
     let localEvaluation = {

@@ -264,6 +264,35 @@ policies:
     expect(config!.policies.session_correlation.mode).toBe("block");
     expect(config!.policies.ci_integrity.mode).toBe("warn");
   });
+
+  it("parses workflow, prompt, and supply chain policy blocks", async () => {
+    mockOctokit(
+      `schema_version: 1
+policies:
+  workflow_security:
+    enabled: true
+    mode: "block"
+    allow_unpinned_actions:
+      - "actions/checkout"
+  prompt_injection:
+    enabled: true
+    mode: "warn"
+  supply_chain:
+    enabled: true
+    mode: "block"
+    force_score_on_critical: 85`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.policies.workflow_security.enabled).toBe(true);
+    expect(config!.policies.workflow_security.mode).toBe("block");
+    expect(config!.policies.workflow_security.allow_unpinned_actions).toEqual([
+      "actions/checkout",
+    ]);
+    expect(config!.policies.prompt_injection.mode).toBe("warn");
+    expect(config!.policies.supply_chain.mode).toBe("block");
+    expect(config!.policies.supply_chain.force_score_on_critical).toBe(85);
+  });
 });
 
 describe("matchesGlobs (re-exported from risk-engine)", () => {
