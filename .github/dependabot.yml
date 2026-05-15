@@ -4,11 +4,18 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "04:00"
     open-pull-requests-limit: 10
     groups:
       actions-toolkit:
         patterns:
           - "@actions/*"
+      toolchain:
+        patterns:
+          - "@types/node"
+          - "typescript"
+          - "tsx"
       lint-format:
         patterns:
           - "eslint*"
@@ -18,27 +25,73 @@ updates:
         patterns:
           - "vitest*"
           - "@vitest/*"
+    ignore:
+      - dependency-name: "zod"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/cli"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "04:10"
     open-pull-requests-limit: 5
+    groups:
+      toolchain:
+        patterns:
+          - "@types/node"
+          - "typescript"
+          - "tsx"
 
   - package-ecosystem: "npm"
     directory: "/app"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "04:20"
     open-pull-requests-limit: 5
+    groups:
+      toolchain:
+        patterns:
+          - "@types/node"
+          - "typescript"
+          - "tsx"
+      app-runtime:
+        patterns:
+          - "@hono/node-server"
+          - "hono"
+          - "@octokit/*"
+    ignore:
+      - dependency-name: "@hono/node-server"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@octokit/webhooks"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/mcp"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "04:30"
     open-pull-requests-limit: 5
+    groups:
+      toolchain:
+        patterns:
+          - "@types/node"
+          - "typescript"
+          - "tsx"
+    ignore:
+      - dependency-name: "zod"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "04:40"
     open-pull-requests-limit: 5
