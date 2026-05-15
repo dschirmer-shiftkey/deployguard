@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { vi } from "vitest";
+
 import { evaluateGate } from "../gate.js";
 import type { TrailheadConfig } from "../types.js";
 

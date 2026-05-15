@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { vi } from "vitest";
 
 vi.mock("@actions/core", () => ({
   debug: vi.fn(),
