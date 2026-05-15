@@ -44,6 +44,22 @@ export const GateEvaluation = z.object({
   reportUrl: z.string().url().optional(),
   environment: z.string().optional(),
   service: z.string().optional(),
+  policyOverride: z
+    .object({
+      owner: z.string(),
+      reason: z.string(),
+      linkedTicket: z.string(),
+      expiresAt: z.string(),
+      appliedAt: z.string(),
+      changes: z
+        .object({
+          failMode: z.enum(["open", "closed"]).optional(),
+          riskThreshold: z.number().min(0).max(100).optional(),
+          warnThreshold: z.number().min(0).max(100).optional(),
+        })
+        .default({}),
+    })
+    .optional(),
 });
 export type GateEvaluation = z.infer<typeof GateEvaluation>;
 

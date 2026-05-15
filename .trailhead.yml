@@ -3,6 +3,8 @@
 # The MCP package copies shared source during prebuild and commits selected
 # runtime artifacts. Score the canonical source files, not their generated copies.
 ignore:
+  - "dist/index.js"
+  - "dist/index.js.map"
   - "mcp/src/risk-engine.ts"
   - "mcp/src/adapters/**"
   - "mcp/dist/risk-engine.*"

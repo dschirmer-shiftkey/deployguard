@@ -1,0 +1,49 @@
+# Suggested threshold baselines by repository archetype.
+# Calibrate after collecting at least 2-4 weeks of pilot signals.
+
+archetypes:
+  application:
+    description: "Customer-facing app repos with frequent releases."
+    thresholds:
+      risk: 72
+      warn: 52
+    environments:
+      production:
+        risk: 65
+        warn: 45
+      staging:
+        risk: 75
+        warn: 55
+      dev:
+        risk: 82
+        warn: 62
+  infrastructure:
+    description: "Infra/platform repos with higher blast radius."
+    thresholds:
+      risk: 68
+      warn: 48
+    environments:
+      production:
+        risk: 60
+        warn: 40
+      staging:
+        risk: 70
+        warn: 50
+      dev:
+        risk: 78
+        warn: 58
+  monorepo-component:
+    description: "Monorepos with service/component boundaries."
+    thresholds:
+      risk: 75
+      warn: 55
+    environments:
+      production:
+        risk: 66
+        warn: 46
+      staging:
+        risk: 76
+        warn: 56
+      dev:
+        risk: 84
+        warn: 64

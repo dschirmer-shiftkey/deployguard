@@ -106,7 +106,7 @@ Trailhead also runs as a GitHub Action (`KomatikAI/trailhead@v3`). The MCP tools
 
 ## Repository Maintenance Notes
 
-- `main` is the active/default branch. `dev` and `staging` are compatibility mirrors and should stay fast-forwarded to `main`.
+- `dev` is the active/default branch. `main` and `staging` are compatibility mirrors and should stay fast-forwarded to `dev`.
 - MCP prebuild copies `src/risk-engine.ts` and `src/adapters/*` into `mcp/src/`; matching `mcp/dist/risk-engine.*` and `mcp/dist/adapters/*` are intentionally committed runtime artifacts.
 - If `src/risk-engine.ts` imports another local module, update the `app/` and `mcp/` prebuild scripts and committed dist artifacts in the same change.
 - `origin/experiment/rd-satellite/deployguard-supply-chain-risk` is not promotion-ready until app and MCP builds pass with the new `supply-chain` module.

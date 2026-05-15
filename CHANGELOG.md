@@ -8,7 +8,7 @@ All notable changes to Trailhead will be documented in this file.
 
 - **Trailhead canonical naming** — Completed the DeployGuard-to-Trailhead migration across action metadata, docs, examples, package metadata, telemetry attributes, risk labels, and persisted evaluation targets.
 - **Compatibility preserved** — `.deployguard.yml` and shipped `DEPLOYGUARD_*` environment variables remain supported as legacy fallbacks.
-- **Repository branch sync** — `main` is the active/default branch; `dev` and `staging` are kept fast-forwarded to `main`.
+- **Repository branch sync** — `dev` is the active/default branch; `main` and `staging` are kept fast-forwarded to `dev`.
 
 ### Fixed
 

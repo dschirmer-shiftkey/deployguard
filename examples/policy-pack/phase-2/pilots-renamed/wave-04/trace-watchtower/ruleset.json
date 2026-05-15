@@ -1,0 +1,63 @@
+{
+  "name": "trailhead-wave04-trace-watchtower",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/dev", "refs/heads/staging", "refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": true,
+        "require_last_push_approval": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "Trailhead",
+            "integration_id": null
+          },
+          {
+            "context": "CI / lint",
+            "integration_id": null
+          },
+          {
+            "context": "CI / test",
+            "integration_id": null
+          },
+          {
+            "context": "Deploy / staging",
+            "integration_id": null
+          },
+          {
+            "context": "Deploy / production",
+            "integration_id": null
+          }
+        ]
+      }
+    },
+    {
+      "type": "required_deployments",
+      "parameters": {
+        "required_deployment_environments": ["staging", "production"]
+      }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 1,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "pull_request"
+    }
+  ]
+}

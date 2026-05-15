@@ -1,0 +1,67 @@
+repos:
+  - name: cairn
+    branch_strategy: progressive
+    criticality: medium
+    archetype: application
+    required_deployments: [staging, production]
+    notes: "Verify service boundaries and deployment environment names."
+  - name: gtm
+    branch_strategy: progressive
+    criticality: medium
+    archetype: application
+    required_deployments: [staging, production]
+    notes: "Growth/marketing workflow changes may need lower warn noise."
+  - name: kindling
+    branch_strategy: progressive
+    criticality: medium
+    archetype: monorepo-component
+    required_deployments: [staging, production]
+    notes: "Confirm component ownership and codeowner coverage."
+  - name: komatik-vector
+    branch_strategy: progressive
+    criticality: high
+    archetype: infrastructure
+    required_deployments: [staging, production]
+    notes: "Vector/data infrastructure can have high blast radius."
+  - name: lodge
+    branch_strategy: progressive
+    criticality: medium
+    archetype: application
+    required_deployments: [staging, production]
+    notes: "Validate release cadence before tightening thresholds."
+  - name: pack
+    branch_strategy: progressive
+    criticality: medium
+    archetype: monorepo-component
+    required_deployments: [staging, production]
+    notes: "Check if monorepo service map is required."
+  - name: sundog
+    branch_strategy: progressive
+    criticality: medium
+    archetype: application
+    required_deployments: [staging, production]
+    notes: "Confirm health endpoints for promotion criteria."
+  - name: trace-floe
+    branch_strategy: progressive
+    criticality: high
+    archetype: infrastructure
+    required_deployments: [staging, production]
+    notes: "Security-adjacent signal path; treat as high criticality."
+  - name: trace-triage
+    branch_strategy: progressive
+    criticality: high
+    archetype: infrastructure
+    required_deployments: [staging, production]
+    notes: "Incident/rescue flow; prioritize rollback readiness."
+  - name: trace-watchtower
+    branch_strategy: progressive
+    criticality: high
+    archetype: infrastructure
+    required_deployments: [staging, production]
+    notes: "Governance/security visibility; ensure low false-negative risk."
+  - name: traverse
+    branch_strategy: progressive
+    criticality: medium
+    archetype: application
+    required_deployments: [staging, production]
+    notes: "Reviewflow lineage likely needs balanced warn tuning."

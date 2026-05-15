@@ -405,6 +405,53 @@ describe("run (main entrypoint)", () => {
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
+  it("defaults to fail-closed for production when fail-mode input is empty", async () => {
+    setupInputs({ "api-key": "test-key", environment: "production" });
+    mockEvaluateGate.mockRejectedValue(new Error("boom"));
+    await runMain();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining("fail-closed"));
+  });
+
+  it("applies governed overrides when metadata is complete", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "override-risk-threshold": "62",
+      "override-warn-threshold": "42",
+      "override-fail-mode": "closed",
+      "override-reason": "Hotfix release window",
+      "override-owner": "release-manager",
+      "override-ticket": "OPS-1234",
+      "override-expires-at": "2099-01-01T00:00:00Z",
+    });
+    mockEvaluateGate.mockResolvedValue(makeEvaluation());
+    await runMain();
+
+    expect(mockEvaluateGate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        riskThreshold: 62,
+        warnThreshold: 42,
+        failMode: "closed",
+      }),
+      "abc1234567890",
+      42,
+    );
+  });
+
+  it("fails when override metadata is incomplete", async () => {
+    setupInputs({
+      "api-key": "test-key",
+      "override-risk-threshold": "62",
+      "override-owner": "release-manager",
+    });
+    await runMain();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid policy override"),
+    );
+    expect(mockEvaluateGate).not.toHaveBeenCalled();
+  });
+
   it("runs self-heal on warn when enabled with test failures", async () => {
     setupInputs({ "api-key": "test-key", "github-token": "ghp_test" });
     mockEvaluateGate.mockResolvedValue(

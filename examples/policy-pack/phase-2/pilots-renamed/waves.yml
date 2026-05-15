@@ -1,0 +1,23 @@
+wave_defaults:
+  repos_per_wave: 3
+  branch_strategy_default: progressive
+  template_ruleset: examples/policy-pack/github-ruleset.progressive.json
+  template_workflow: examples/policy-pack/phase-2/trailhead-enforced-workflow.yml
+
+waves:
+  - id: wave-01
+    repos: [cairn, gtm, kindling]
+    priority: medium
+    objective: "Establish first stable enforced cohort."
+  - id: wave-02
+    repos: [komatik-vector, lodge, pack]
+    priority: high
+    objective: "Expand to infra + component mix and validate noise profile."
+  - id: wave-03
+    repos: [sundog, traverse, trace-floe]
+    priority: high
+    objective: "Include one high-criticality trace repo with two medium peers."
+  - id: wave-04
+    repos: [trace-triage, trace-watchtower]
+    priority: critical
+    objective: "Finish highest-criticality governance and rescue paths."

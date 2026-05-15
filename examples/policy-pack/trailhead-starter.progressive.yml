@@ -1,0 +1,29 @@
+# Starter policy for repositories using dev -> staging -> main promotion.
+
+thresholds:
+  risk: 80
+  warn: 60
+
+environments:
+  dev:
+    risk: 85
+    warn: 65
+  staging:
+    risk: 75
+    warn: 55
+  production:
+    risk: 65
+    warn: 45
+    require_security_clear: true
+
+security:
+  severity_threshold: warning
+  block_on_critical: true
+
+canary:
+  webhook_type: generic
+
+freeze:
+  - days: ["friday"]
+    afterHour: 15
+    message: "No Friday afternoon promotions"

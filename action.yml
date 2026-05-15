@@ -24,9 +24,37 @@ inputs:
     required: false
     default: ""
   fail-mode:
-    description: "What to do when Trailhead itself errors: 'open' allows the deploy, 'closed' blocks it."
+    description: "Error mode when Trailhead fails. Default is env-aware: production=closed, others=open."
     required: false
-    default: "open"
+    default: ""
+  override-fail-mode:
+    description: "Governed override for fail-mode (open|closed). Requires reason/owner/ticket/expiry inputs."
+    required: false
+    default: ""
+  override-risk-threshold:
+    description: "Governed override for risk-threshold (0-100). Requires reason/owner/ticket/expiry inputs."
+    required: false
+    default: ""
+  override-warn-threshold:
+    description: "Governed override for warn-threshold (0-100). Requires reason/owner/ticket/expiry inputs."
+    required: false
+    default: ""
+  override-reason:
+    description: "Required when any override is set. Human-readable reason for temporary policy override."
+    required: false
+    default: ""
+  override-owner:
+    description: "Required when any override is set. Owner accountable for the override."
+    required: false
+    default: ""
+  override-ticket:
+    description: "Required when any override is set. Linked change ticket (Jira/GitHub issue/etc.)."
+    required: false
+    default: ""
+  override-expires-at:
+    description: "Required when any override is set. ISO-8601 expiry timestamp for the override."
+    required: false
+    default: ""
   self-heal:
     description: "Attempt to auto-repair failing tests before blocking (requires TRAILHEAD_TEST_FAILURES env)."
     required: false

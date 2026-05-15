@@ -1159,6 +1159,28 @@ export function formatGateReport(
     lines.push(`**Risk:** ${buildScoreBar(evaluation.riskScore, riskThreshold)}`, ``);
   }
 
+  if (evaluation.policyOverride) {
+    const override = evaluation.policyOverride;
+    const changes: string[] = [];
+    if (override.changes.failMode) changes.push(`fail-mode=${override.changes.failMode}`);
+    if (override.changes.riskThreshold !== undefined) {
+      changes.push(`risk-threshold=${override.changes.riskThreshold}`);
+    }
+    if (override.changes.warnThreshold !== undefined) {
+      changes.push(`warn-threshold=${override.changes.warnThreshold}`);
+    }
+    lines.push(
+      `### Policy Override`,
+      ``,
+      `- Owner: \`${override.owner}\``,
+      `- Ticket: \`${override.linkedTicket}\``,
+      `- Reason: ${override.reason}`,
+      `- Expires: \`${override.expiresAt}\``,
+      `- Changes: ${changes.length > 0 ? changes.join(", ") : "none"}`,
+      ``,
+    );
+  }
+
   if (evaluation.riskFactors.length > 0) {
     lines.push(
       `<details><summary><strong>Risk Factor Breakdown</strong> (${evaluation.riskFactors.length} factors)</summary>`,
