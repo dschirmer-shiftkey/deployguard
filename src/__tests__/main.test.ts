@@ -171,6 +171,10 @@ describe("run (main entrypoint)", () => {
       "evaluation-json",
       expect.stringContaining('"gateDecision":"allow"'),
     );
+    expect(mockSetOutput).toHaveBeenCalledWith(
+      "rollout-readiness-json",
+      expect.stringContaining('"band"'),
+    );
     expect(mockInfo).toHaveBeenCalledWith("## Report");
     expect(mockSetFailed).not.toHaveBeenCalled();
   });

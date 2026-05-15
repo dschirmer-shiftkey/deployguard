@@ -42,6 +42,76 @@ interface PolicyOverrideAudit {
   };
 }
 
+function computeRolloutReadiness(evaluation: {
+  gateDecision: "allow" | "warn" | "block";
+  riskScore: number;
+  healthScore: number;
+  policyFindings?: string[];
+  trust_profile?: { strictness: "baseline" | "elevated" | "strict"; reason: string };
+  escalation_status?: { enabled: boolean; target_count: number };
+}): {
+  ready: boolean;
+  band: "go" | "review" | "hold";
+  score: number;
+  reasons: string[];
+} {
+  let score = Math.max(0, Math.min(100, 100 - evaluation.riskScore));
+  const reasons: string[] = [];
+
+  if (evaluation.gateDecision === "warn") {
+    score -= 10;
+    reasons.push("Gate decision is WARN");
+  } else if (evaluation.gateDecision === "block") {
+    score -= 30;
+    reasons.push("Gate decision is BLOCK");
+  }
+
+  if (evaluation.healthScore < 50) {
+    score -= 20;
+    reasons.push("Health score below 50");
+  }
+
+  const strictness = evaluation.trust_profile?.strictness ?? "baseline";
+  if (strictness === "elevated") {
+    score -= 5;
+    reasons.push("Elevated trust profile strictness");
+  } else if (strictness === "strict") {
+    score -= 10;
+    reasons.push("Strict trust profile strictness");
+  }
+
+  const hasBlockingFinding = (evaluation.policyFindings ?? []).some((f) =>
+    /(blocking pattern|requires|exceeds|detected)/i.test(f),
+  );
+  if (hasBlockingFinding) {
+    score -= 10;
+    reasons.push("Policy findings include blocking-style signals");
+  }
+
+  if (
+    evaluation.escalation_status?.enabled &&
+    evaluation.escalation_status.target_count > 0
+  ) {
+    score += 5;
+    reasons.push("Escalation targets configured");
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const band =
+    evaluation.gateDecision === "allow" && score >= 70
+      ? "go"
+      : evaluation.gateDecision !== "block" && score >= 45
+        ? "review"
+        : "hold";
+
+  return {
+    ready: band === "go",
+    band,
+    score,
+    reasons,
+  };
+}
+
 function initHealers(): void {
   registerHealer(jestHealer);
   registerHealer(playwrightHealer);
@@ -247,6 +317,10 @@ async function run(): Promise<void> {
     core.setOutput("risk-score", evaluation.riskScore.toString());
     core.setOutput("gate-decision", evaluation.gateDecision);
     core.setOutput("evaluation-json", JSON.stringify(evaluation));
+    core.setOutput(
+      "rollout-readiness-json",
+      JSON.stringify(computeRolloutReadiness(evaluation)),
+    );
     if (evaluation.reportUrl) {
       core.setOutput("report-url", evaluation.reportUrl);
     }
