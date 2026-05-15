@@ -237,6 +237,22 @@ Persist evaluation results for trend analysis:
 
 The current fallback table is `trailhead_evaluations`.
 
+## Rollout Readiness Output
+
+Action runs emit `rollout-readiness-json`, a compact go/review/hold recommendation derived
+from gate decision, risk/health scores, trust profile strictness, and governance findings.
+
+Example:
+
+```json
+{
+  "ready": false,
+  "band": "review",
+  "score": 58,
+  "reasons": ["Gate decision is WARN", "Elevated trust profile strictness"]
+}
+```
+
 ## Branch and Release Context
 
 This repository uses `dev` as the active/default branch. `main` and `staging` are kept
