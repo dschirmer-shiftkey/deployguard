@@ -1082,9 +1082,10 @@ describe("MCP tool: recommend-policy-tuning (logic)", () => {
         detector,
         falsePositiveRate:
           stat.total > 0 ? Math.round((stat.falsePositive / stat.total) * 1000) / 10 : 0,
-        confidence: (
-          stat.total >= 20 ? "high" : stat.total >= 8 ? "medium" : "low"
-        ) as "high" | "medium" | "low",
+        confidence: (stat.total >= 20 ? "high" : stat.total >= 8 ? "medium" : "low") as
+          | "high"
+          | "medium"
+          | "low",
       }))
       .filter((s) => s.falsePositiveRate > falsePositiveThreshold);
   }

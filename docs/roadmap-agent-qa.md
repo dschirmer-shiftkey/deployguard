@@ -306,13 +306,13 @@
 
 ## Cross-Cutting Constraints (All Steps)
 
-| Constraint | Target |
-| --- | --- |
+| Constraint             | Target                                                          |
+| ---------------------- | --------------------------------------------------------------- |
 | Backward compatibility | Existing `.trailhead.yml` files work without changes on upgrade |
-| Performance | p95 gate evaluation < 30s with all detectors active |
-| Self-test coverage | Every new detector exercised by Trailhead Self-Test workflow |
-| MCP parity | Every new gate capability available as an MCP tool |
-| Documentation | Each step ships with updated `docs/README.md` and skill file |
+| Performance            | p95 gate evaluation < 30s with all detectors active             |
+| Self-test coverage     | Every new detector exercised by Trailhead Self-Test workflow    |
+| MCP parity             | Every new gate capability available as an MCP tool              |
+| Documentation          | Each step ships with updated `docs/README.md` and skill file    |
 
 ## Program Success Criteria
 

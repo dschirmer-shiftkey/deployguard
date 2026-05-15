@@ -453,7 +453,7 @@ function detectCiIntegrityRisk(files: PrFileInfo[]): CiIntegrityDetection {
     const patch = file.patch ?? "";
     if (!patch) continue;
     if (
-      /^\-\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch) &&
+      /^-\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch) &&
       /^\+\s*(branches|functions|lines|statements)\s*:\s*\d+/m.test(patch)
     ) {
       warningSignals.push(`${file.filename}: coverage threshold definition changed`);
@@ -658,7 +658,7 @@ function detectSupplyChainRisk(files: PrFileInfo[]): SupplyChainDetection {
     }
 
     const majorBumpRegex =
-      /^\-\s*"(@?[\w.-]+)"\s*:\s*"\^?(\d+)\.[^"]*"\n\+\s*"\1"\s*:\s*"\^?(\d+)\./gm;
+      /^-\s*"(@?[\w.-]+)"\s*:\s*"\^?(\d+)\.[^"]*"\n\+\s*"\1"\s*:\s*"\^?(\d+)\./gm;
     for (const match of patch.matchAll(majorBumpRegex)) {
       const prevMajor = Number(match[2]);
       const nextMajor = Number(match[3]);
