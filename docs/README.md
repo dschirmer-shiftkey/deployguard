@@ -26,24 +26,27 @@ All three share a single **risk engine** (`src/risk-engine.ts`) — a pure TypeS
 
 ## Risk Scoring
 
-Every evaluation produces a **risk score** (0–100) computed as a weighted average of up to 13 factors:
+Every evaluation produces a **risk score** (0-100) computed as a weighted average of 17 factors:
 
-| Factor                  | Weight | What it measures                                                  |
-| ----------------------- | ------ | ----------------------------------------------------------------- |
-| `security_alerts`       | 4      | Open code scanning alerts (critical=30, high=15, medium=5 each)   |
-| `code_churn`            | 3      | Lines changed, weighted by file sensitivity (auth 3x, infra 2x)   |
-| `sensitive_files`       | 3      | Whether the PR touches auth, migrations, payments, CI, or secrets |
-| `file_count`            | 2      | Number of files changed (logarithmic scale)                       |
-| `test_coverage`         | 2      | Ratio of test files to source files in the PR                     |
-| `dependency_changes`    | 2      | Whether dependency manifests or lockfiles were modified           |
-| `deployment_history`    | 2      | Recent deployment failures in the target environment              |
-| `canary_status`         | 2      | Deploy outcome signals from canary/progressive rollouts           |
-| `author_history`        | 1      | How familiar the author is with the repo (90-day commit count)    |
-| `pr_age`                | 1      | How long the PR has been open (stale PRs carry more risk)         |
-| `ci_integrity`          | 3      | CI confidence downgrades (bypass patterns, test deletion signals) |
-| `workflow_security`     | 4      | Workflow hardening checks (token scope, untrusted shell patterns) |
-| `prompt_injection_risk` | 4      | Unsanitized untrusted input flowing into prompts/command paths    |
-| `supply_chain`          | 3      | Dependency introduction/major jumps/vuln markers in diff          |
+| Factor                  | Weight | What it measures                                                             |
+| ----------------------- | ------ | ---------------------------------------------------------------------------- |
+| `security_alerts`       | 4      | Open code scanning alerts (critical=30, high=15, medium=5 each)              |
+| `code_churn`            | 3      | Lines changed, weighted by file sensitivity (auth 3x, infra 2x)              |
+| `sensitive_files`       | 3      | Whether the PR touches auth, migrations, payments, CI, or secrets            |
+| `file_count`            | 2      | Number of files changed (logarithmic scale)                                  |
+| `test_coverage`         | 2      | Ratio of test files to source files in the PR                                |
+| `dependency_changes`    | 2      | Whether dependency manifests or lockfiles were modified                      |
+| `deployment_history`    | 2      | Recent deployment failures in the target environment                         |
+| `canary_status`         | 2      | Deploy outcome signals from canary/progressive rollouts                      |
+| `author_history`        | 1      | How familiar the author is with the repo (90-day commit count)               |
+| `pr_age`                | 1      | How long the PR has been open (stale PRs carry more risk)                    |
+| `ci_integrity`          | 3      | CI confidence downgrades (bypass patterns, test deletion signals)            |
+| `workflow_security`     | 4      | Workflow hardening checks (token scope, untrusted shell patterns)            |
+| `prompt_injection_risk` | 4      | Unsanitized untrusted input flowing into prompts/command paths               |
+| `supply_chain`          | 3      | Dependency introduction/major jumps/vuln markers in diff                     |
+| `pr_scope`              | 2      | Oversized PR pressure and plan requirements for agent-authored changes       |
+| `duplicate_logic`       | 1      | Newly added helper/utility logic that appears to duplicate existing patterns |
+| `cross_repo_impact`     | 2      | Contract changes that impact declared downstream repos/services              |
 
 ### Sensitivity Weighting
 

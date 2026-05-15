@@ -46,26 +46,43 @@ No API key. No secrets. That's it.
 
 ## How It Works
 
-Trailhead analyzes every pull request and produces a **risk score** (0-100) based on:
+Trailhead analyzes every pull request and produces a **risk score** (0-100) based on 17 weighted factors:
 
-| Factor               | Weight | What it measures                                                                                    |
-| -------------------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `security_alerts`    | 4      | Open code scanning alerts (critical=30pt, high=15pt, medium=5pt each)                               |
-| `code_churn`         | 3      | Lines changed, weighted by file sensitivity (auth files 3x, infra 2x, config 0.5x, test files 0.3x) |
-| `sensitive_files`    | 3      | Whether the PR touches auth, migrations, payments, CI, or secrets                                   |
-| `file_count`         | 2      | Number of files changed (logarithmic scale)                                                         |
-| `test_coverage`      | 2      | Ratio of test files to source files in the PR                                                       |
-| `dependency_changes` | 2      | Whether dependency manifests or lockfiles were modified                                             |
-| `deployment_history` | 2      | Recent deployment failures in the target environment                                                |
-| `canary_status`      | 2      | Deploy outcome signals from canary/progressive rollouts                                             |
-| `author_history`     | 1      | How familiar the author is with the repo (90-day commit count)                                      |
-| `pr_age`             | 1      | How long the PR has been open (stale PRs carry more risk)                                           |
+| Factor                  | Weight | What it measures                                                                                                 |
+| ----------------------- | ------ | ---------------------------------------------------------------------------------------------------------------- |
+| `security_alerts`       | 4      | Open code scanning alerts (critical=30pt, high=15pt, medium=5pt each)                                            |
+| `workflow_security`     | 4      | Dangerous workflow patterns (`write-all`, unpinned actions, untrusted shell interpolation)                       |
+| `prompt_injection_risk` | 4      | Unsanitized untrusted input flowing into LLM prompts or command execution paths                                  |
+| `code_churn`            | 3      | Lines changed, weighted by file sensitivity (auth 3x, infra 2x, config 0.5x, test 0.3x)                          |
+| `sensitive_files`       | 3      | Whether the PR touches auth, migrations, payments, CI, or secrets                                                |
+| `ci_integrity`          | 3      | CI confidence downgrades (shell bypass patterns, `continue-on-error`, heavy test deletion, coverage relaxations) |
+| `supply_chain`          | 3      | Dependency introduction, major version jumps, and critical-vulnerability markers in diffs                        |
+| `file_count`            | 2      | Number of files changed (logarithmic scale)                                                                      |
+| `test_coverage`         | 2      | Ratio of test files to source files in the PR                                                                    |
+| `dependency_changes`    | 2      | Whether dependency manifests or lockfiles were modified                                                          |
+| `deployment_history`    | 2      | Recent deployment failures in the target environment                                                             |
+| `canary_status`         | 2      | Deploy outcome signals from canary/progressive rollouts                                                          |
+| `pr_scope`              | 2      | Scope pressure from oversized PRs (file/change thresholds and plan requirements)                                 |
+| `cross_repo_impact`     | 2      | Contract-surface changes that affect declared downstream services/repos                                          |
+| `author_history`        | 1      | How familiar the author is with the repo (90-day commit count)                                                   |
+| `pr_age`                | 1      | How long the PR has been open (stale PRs carry more risk)                                                        |
+| `duplicate_logic`       | 1      | Newly added utility/helper logic that appears to duplicate existing code patterns                                |
 
 The weighted average determines the decision:
 
 - **allow** — risk below `warn-threshold` (default: 55)
 - **warn** — risk between warn and block thresholds
 - **block** — risk above `risk-threshold` (default: 70), fails the check
+
+### Agent Governance Signals
+
+Beyond the scalar risk score, Trailhead now emits governance context in `evaluation-json`:
+
+- PR provenance classification (`human`, `dependabot`, `copilot`, `codex`, `claude`, `custom-bot`, `unknown`)
+- Agent-policy findings (approval requirements, sensitive-path gates, strict unknown handling)
+- Session-correlation burst signals
+- Trust profile strictness (`baseline`, `elevated`, `strict`)
+- Escalation status metadata and SLA fields
 
 ## Inputs
 
@@ -107,6 +124,7 @@ The weighted average determines the decision:
 | `health-score`              | Infrastructure health score (0-100, always 100 when no health checks configured) |
 | `gate-decision`             | `allow`, `warn`, or `block`                                                      |
 | `evaluation-json`           | Full evaluation as JSON for downstream steps                                     |
+| `rollout-readiness-json`    | Rollout recommendation payload (`go`, `review`, `hold`) with readiness score     |
 | `report-url`                | Report URL (only when using remote API)                                          |
 | `security-alerts-json`      | Code scanning alert summary as JSON (when alerts exist)                          |
 | `environment`               | Deployment environment used for this evaluation                                  |
@@ -164,6 +182,8 @@ Results appear as shield badges in the Job Summary and are available as action o
 Create `.trailhead.yml` in your repo root:
 
 ```yaml
+schema_version: 1
+
 sensitivity:
   high:
     - "src/auth/**"
@@ -190,6 +210,8 @@ services:
   api:
     paths: ["src/api/**", "src/models/**"]
     environment: production
+    contracts: ["src/api/contracts/**"]
+    consumers: ["web", "worker"]
   web:
     paths: ["src/components/**", "src/pages/**"]
     environment: preview
@@ -202,6 +224,52 @@ security:
 # Canary / deploy outcome tracking
 canary:
   webhook_type: vercel
+
+escalation:
+  targets: ["slack:#release-ops", "email:oncall@example.com"]
+  acknowledge_sla_minutes: 30
+  resolve_sla_minutes: 240
+
+policies:
+  agent_prs:
+    enabled: true
+    risk_threshold: 60
+    required_approvals: 2
+    require_code_owner_approval: true
+    code_owner_reviewers: ["platform-owner"]
+    sensitive_paths: ["src/auth/**", "src/billing/**", ".github/workflows/**"]
+    strict_on_unknown_provenance: true
+  session_correlation:
+    enabled: true
+    threshold: 3
+    window_minutes: 60
+    mode: warn
+  ci_integrity:
+    enabled: true
+    mode: block
+  workflow_security:
+    enabled: true
+    mode: block
+    allow_unpinned_actions: []
+  prompt_injection:
+    enabled: true
+    mode: block
+  supply_chain:
+    enabled: true
+    mode: warn
+    force_score_on_critical: 80
+  pr_scope:
+    enabled: true
+    max_files: 50
+    max_changes: 2000
+    mode: warn
+    require_plan_for_agent_prs: true
+  duplicate_logic:
+    enabled: true
+    mode: warn
+  cross_repo_impact:
+    enabled: true
+    mode: warn
 
 # Release freeze windows
 freeze:
