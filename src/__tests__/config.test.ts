@@ -293,6 +293,48 @@ policies:
     expect(config!.policies.supply_chain.mode).toBe("block");
     expect(config!.policies.supply_chain.force_score_on_critical).toBe(85);
   });
+
+  it("parses pr scope, cross-repo impact, duplicate logic, and escalation blocks", async () => {
+    mockOctokit(
+      `schema_version: 1
+services:
+  api:
+    paths:
+      - "src/api/**"
+    contracts:
+      - "src/api/contracts/**"
+    consumers:
+      - "web"
+      - "worker"
+escalation:
+  targets:
+    - "slack://eng-alerts"
+  acknowledge_sla_minutes: 15
+  resolve_sla_minutes: 120
+policies:
+  pr_scope:
+    enabled: true
+    max_files: 40
+    max_changes: 1500
+    mode: "block"
+    require_plan_for_agent_prs: true
+  duplicate_logic:
+    enabled: true
+    mode: "warn"
+  cross_repo_impact:
+    enabled: true
+    mode: "block"`,
+    );
+    const config = await loadRepoConfig("ghp_test");
+    expect(config).not.toBeNull();
+    expect(config!.services.api.contracts).toEqual(["src/api/contracts/**"]);
+    expect(config!.services.api.consumers).toEqual(["web", "worker"]);
+    expect(config!.escalation.targets).toEqual(["slack://eng-alerts"]);
+    expect(config!.escalation.acknowledge_sla_minutes).toBe(15);
+    expect(config!.policies.pr_scope.max_files).toBe(40);
+    expect(config!.policies.pr_scope.mode).toBe("block");
+    expect(config!.policies.cross_repo_impact.mode).toBe("block");
+  });
 });
 
 describe("matchesGlobs (re-exported from risk-engine)", () => {

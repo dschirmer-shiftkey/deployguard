@@ -78,6 +78,20 @@ export const GateEvaluation = z.object({
       window: z.string(),
     })
     .optional(),
+  escalation_status: z
+    .object({
+      enabled: z.boolean(),
+      target_count: z.number().int().min(0),
+      acknowledge_sla_minutes: z.number().int().min(1).optional(),
+      resolve_sla_minutes: z.number().int().min(1).optional(),
+    })
+    .optional(),
+  trust_profile: z
+    .object({
+      strictness: z.enum(["baseline", "elevated", "strict"]),
+      reason: z.string(),
+    })
+    .optional(),
   policyOverride: z
     .object({
       owner: z.string(),
@@ -127,6 +141,8 @@ export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
 export const ServiceMapping = z.object({
   paths: z.array(z.string()),
   environment: z.string().optional(),
+  consumers: z.array(z.string()).default([]),
+  contracts: z.array(z.string()).default([]),
 });
 export type ServiceMapping = z.infer<typeof ServiceMapping>;
 
@@ -166,6 +182,13 @@ export const RepoConfig = z.object({
   services: z.record(ServiceMapping).default({}),
   security: SecurityConfig.default({}),
   canary: CanaryConfig.optional(),
+  escalation: z
+    .object({
+      targets: z.array(z.string()).default([]),
+      acknowledge_sla_minutes: z.number().int().min(1).default(30),
+      resolve_sla_minutes: z.number().int().min(1).default(240),
+    })
+    .default({}),
   policies: z
     .object({
       agent_prs: z
@@ -211,6 +234,27 @@ export const RepoConfig = z.object({
           enabled: z.boolean().default(true),
           mode: z.enum(["warn", "block"]).default("warn"),
           force_score_on_critical: z.number().min(0).max(100).default(80),
+        })
+        .default({}),
+      pr_scope: z
+        .object({
+          enabled: z.boolean().default(true),
+          max_files: z.number().int().min(1).default(50),
+          max_changes: z.number().int().min(1).default(2000),
+          mode: z.enum(["warn", "block"]).default("warn"),
+          require_plan_for_agent_prs: z.boolean().default(false),
+        })
+        .default({}),
+      duplicate_logic: z
+        .object({
+          enabled: z.boolean().default(true),
+          mode: z.enum(["warn", "block"]).default("warn"),
+        })
+        .default({}),
+      cross_repo_impact: z
+        .object({
+          enabled: z.boolean().default(true),
+          mode: z.enum(["warn", "block"]).default("warn"),
         })
         .default({}),
     })

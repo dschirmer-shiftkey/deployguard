@@ -40340,6 +40340,18 @@ const GateEvaluation = objectType({
         window: stringType(),
     })
         .optional(),
+    escalation_status: objectType({
+        enabled: booleanType(),
+        target_count: numberType().int().min(0),
+        acknowledge_sla_minutes: numberType().int().min(1).optional(),
+        resolve_sla_minutes: numberType().int().min(1).optional(),
+    })
+        .optional(),
+    trust_profile: objectType({
+        strictness: enumType(["baseline", "elevated", "strict"]),
+        reason: stringType(),
+    })
+        .optional(),
     policyOverride: objectType({
         owner: stringType(),
         reason: stringType(),
@@ -40379,6 +40391,8 @@ const EnvironmentConfig = objectType({
 const ServiceMapping = objectType({
     paths: arrayType(stringType()),
     environment: stringType().optional(),
+    consumers: arrayType(stringType()).default([]),
+    contracts: arrayType(stringType()).default([]),
 });
 const SecurityConfig = objectType({
     severity_threshold: enumType(["error", "warning", "note", "none"]).default("warning"),
@@ -40410,6 +40424,12 @@ const RepoConfig = objectType({
     services: recordType(ServiceMapping).default({}),
     security: SecurityConfig.default({}),
     canary: CanaryConfig.optional(),
+    escalation: objectType({
+        targets: arrayType(stringType()).default([]),
+        acknowledge_sla_minutes: numberType().int().min(1).default(30),
+        resolve_sla_minutes: numberType().int().min(1).default(240),
+    })
+        .default({}),
     policies: objectType({
         agent_prs: objectType({
             enabled: booleanType().default(false),
@@ -40448,6 +40468,24 @@ const RepoConfig = objectType({
             enabled: booleanType().default(true),
             mode: enumType(["warn", "block"]).default("warn"),
             force_score_on_critical: numberType().min(0).max(100).default(80),
+        })
+            .default({}),
+        pr_scope: objectType({
+            enabled: booleanType().default(true),
+            max_files: numberType().int().min(1).default(50),
+            max_changes: numberType().int().min(1).default(2000),
+            mode: enumType(["warn", "block"]).default("warn"),
+            require_plan_for_agent_prs: booleanType().default(false),
+        })
+            .default({}),
+        duplicate_logic: objectType({
+            enabled: booleanType().default(true),
+            mode: enumType(["warn", "block"]).default("warn"),
+        })
+            .default({}),
+        cross_repo_impact: objectType({
+            enabled: booleanType().default(true),
+            mode: enumType(["warn", "block"]).default("warn"),
         })
             .default({}),
     })
@@ -40804,6 +40842,7 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
     "services",
     "security",
     "canary",
+    "escalation",
     "policies",
 ]);
 function parseYaml(input) {
@@ -41636,6 +41675,128 @@ function detectSupplyChainRisk(files) {
         criticalVulnDetected,
     };
 }
+async function detectPrScopeRisk(params) {
+    const cfg = params.repoConfig?.policies?.pr_scope;
+    if (!cfg?.enabled)
+        return { factor: null, findings: [], forceBlock: false };
+    const fileCount = params.files.length;
+    const totalChanges = params.files.reduce((sum, f) => sum + f.changes, 0);
+    const findings = [];
+    let score = 0;
+    if (fileCount > cfg.max_files) {
+        findings.push(`PR scope exceeds max_files (${fileCount} > ${cfg.max_files}).`);
+        score += 45;
+    }
+    if (totalChanges > cfg.max_changes) {
+        findings.push(`PR scope exceeds max_changes (${totalChanges} > ${cfg.max_changes}).`);
+        score += 45;
+    }
+    if (cfg.require_plan_for_agent_prs &&
+        params.prNumber &&
+        params.token &&
+        params.provenance &&
+        params.provenance.type !== "human") {
+        try {
+            const octokit = getOctokit(params.token);
+            const { owner, repo } = github_context.repo;
+            const { data: pr } = await octokit.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: params.prNumber,
+            });
+            const body = (pr.body ?? "").trim();
+            const hasPlan = /##\s*plan/i.test(body) ||
+                /###\s*plan/i.test(body) ||
+                /- \[[ xX]\].*test/i.test(body);
+            if (!hasPlan) {
+                findings.push("Agent PR plan required but PR body lacks a plan/test checklist section.");
+                score += 30;
+            }
+        }
+        catch (error) {
+            core.debug(`PR scope plan check failed: ${error}`);
+        }
+    }
+    if (score === 0) {
+        return { factor: null, findings: [], forceBlock: false };
+    }
+    return {
+        factor: {
+            type: "pr_scope",
+            score: Math.min(100, score),
+            detail: {
+                fileCount,
+                totalChanges,
+                findings,
+                description: "PR size/scope and decomposition risk",
+            },
+        },
+        findings,
+        forceBlock: cfg.mode === "block",
+    };
+}
+function detectDuplicateLogicRisk(files) {
+    const helperFiles = files.filter((f) => /(?:^|\/)(?:utils?|helpers?|validators?)\/|(?:^|\/)(?:util|helper|validator)\./i.test(f.filename));
+    const basenameMap = new Map();
+    for (const file of helperFiles) {
+        const normalized = file.filename.replace(/\\/g, "/");
+        const base = normalized.split("/").pop() ?? normalized;
+        basenameMap.set(base, [...(basenameMap.get(base) ?? []), normalized]);
+    }
+    const duplicates = [...basenameMap.entries()].filter(([, paths]) => paths.length > 1);
+    if (duplicates.length === 0)
+        return { factor: null, findings: [] };
+    const findings = duplicates.map(([base, paths]) => `Potential duplicate helper logic for ${base}: ${paths.slice(0, 3).join(", ")}${paths.length > 3 ? "..." : ""}`);
+    const score = Math.min(100, duplicates.length * 25);
+    return {
+        factor: {
+            type: "duplicate_logic",
+            score,
+            detail: {
+                duplicates: findings,
+                description: "Potential duplicate helper/utility additions",
+            },
+        },
+        findings,
+    };
+}
+function detectCrossRepoImpact(files, repoConfig) {
+    const cfg = repoConfig?.policies?.cross_repo_impact;
+    if (!cfg?.enabled)
+        return { factor: null, findings: [], affectedConsumers: [] };
+    const affectedConsumers = new Set();
+    const findings = [];
+    for (const [serviceName, service] of Object.entries(repoConfig?.services ?? {})) {
+        const contractPatterns = service.contracts ?? [];
+        if (contractPatterns.length === 0)
+            continue;
+        const touchedContracts = files
+            .filter((f) => matchesGlobs(f.filename, contractPatterns))
+            .map((f) => f.filename);
+        if (touchedContracts.length === 0)
+            continue;
+        for (const consumer of service.consumers ?? []) {
+            affectedConsumers.add(consumer);
+        }
+        findings.push(`Contract surface changed for service "${serviceName}" (${touchedContracts.length} file(s)).`);
+    }
+    if (findings.length === 0) {
+        return { factor: null, findings: [], affectedConsumers: [] };
+    }
+    return {
+        factor: {
+            type: "cross_repo_impact",
+            score: Math.min(100, 30 + affectedConsumers.size * 15),
+            detail: {
+                findings,
+                affectedConsumers: [...affectedConsumers],
+                description: "Potential downstream consumer impact from contract changes",
+            },
+        },
+        findings,
+        affectedConsumers: [...affectedConsumers],
+    };
+}
 async function detectSessionCorrelation(params) {
     const cfg = params.repoConfig?.policies?.session_correlation;
     if (!cfg?.enabled || !params.prNumber || !params.token || !params.provenance)
@@ -42100,6 +42261,27 @@ async function evaluateGate(config, commitSha, prNumber) {
         }
         riskFactors.push(supplyChain.factor);
     }
+    const prScope = await detectPrScopeRisk({
+        files,
+        repoConfig,
+        prNumber,
+        token: config.githubToken,
+        provenance,
+    });
+    if (prScope.factor) {
+        riskFactors.push(prScope.factor);
+    }
+    const duplicateLogicConfig = repoConfig?.policies?.duplicate_logic;
+    const duplicateLogic = duplicateLogicConfig?.enabled === false
+        ? { factor: null, findings: [] }
+        : detectDuplicateLogicRisk(files);
+    if (duplicateLogic.factor) {
+        riskFactors.push(duplicateLogic.factor);
+    }
+    const crossRepoImpact = detectCrossRepoImpact(files, repoConfig);
+    if (crossRepoImpact.factor) {
+        riskFactors.push(crossRepoImpact.factor);
+    }
     const riskScore = riskFactors.length > 0
         ? weightedAverageScores(riskFactors, customWeights)
         : localRiskScore;
@@ -42153,6 +42335,11 @@ async function evaluateGate(config, commitSha, prNumber) {
             (promptInjectionConfig?.mode ?? "block") === "block") ||
         ((supplyChain.blockingPatterns.length > 0 || supplyChain.criticalVulnDetected) &&
             (supplyChainConfig?.mode ?? "warn") === "block") ||
+        (prScope.forceBlock && prScope.findings.length > 0) ||
+        ((duplicateLogic.factor?.score ?? 0) >= 60 &&
+            (duplicateLogicConfig?.mode ?? "warn") === "block") ||
+        ((crossRepoImpact.factor?.score ?? 0) >= 60 &&
+            (repoConfig?.policies?.cross_repo_impact?.mode ?? "warn") === "block") ||
         (sessionCorrelation &&
             sessionCfg &&
             sessionCorrelation.burstCount >= sessionCfg.threshold &&
@@ -42180,7 +42367,45 @@ async function evaluateGate(config, commitSha, prNumber) {
     if (supplyChain.warnings.length > 0) {
         policyFindings.push(`Supply-chain warnings detected (${supplyChain.warnings.length}).`);
     }
+    if (prScope.findings.length > 0) {
+        policyFindings.push(...prScope.findings);
+    }
+    if (duplicateLogic.findings.length > 0) {
+        policyFindings.push(`Potential duplicate logic findings (${duplicateLogic.findings.length}).`);
+    }
+    if (crossRepoImpact.findings.length > 0) {
+        policyFindings.push(...crossRepoImpact.findings);
+        if (crossRepoImpact.affectedConsumers.length > 0) {
+            policyFindings.push(`Potential downstream impact for: ${crossRepoImpact.affectedConsumers.join(", ")}.`);
+        }
+    }
     const fileNames = files.map((f) => f.filename);
+    const escalationCfg = repoConfig?.escalation;
+    const escalationStatus = gateDecision === "block" && escalationCfg
+        ? {
+            enabled: escalationCfg.targets.length > 0,
+            target_count: escalationCfg.targets.length,
+            acknowledge_sla_minutes: escalationCfg.acknowledge_sla_minutes,
+            resolve_sla_minutes: escalationCfg.resolve_sla_minutes,
+        }
+        : undefined;
+    if (escalationStatus?.enabled) {
+        policyFindings.push(`Escalation configured with ${escalationStatus.target_count} target(s); acknowledge within ${escalationStatus.acknowledge_sla_minutes} minutes.`);
+    }
+    const trustProfile = provenance?.type && provenance.type !== "human"
+        ? riskScore >= 75
+            ? {
+                strictness: "strict",
+                reason: "Automated provenance with high composite risk score",
+            }
+            : {
+                strictness: "elevated",
+                reason: "Automated provenance with elevated review requirements",
+            }
+        : {
+            strictness: "baseline",
+            reason: "Human provenance or unknown automation signals",
+        };
     let localEvaluation = {
         id: `dg-${commitSha.substring(0, 7)}-${Date.now()}`,
         repoId: `${github_context.repo.owner}/${github_context.repo.repo}`,
@@ -42211,6 +42436,8 @@ async function evaluateGate(config, commitSha, prNumber) {
                 window: `${sessionCorrelation.windowMinutes}m`,
             }
             : undefined,
+        escalation_status: escalationStatus,
+        trust_profile: trustProfile,
     };
     if (config.apiKey) {
         const apiResponse = await callGateApi(config, localEvaluation);
@@ -42578,6 +42805,18 @@ function formatGateReport(evaluation, riskThreshold) {
     }
     if (evaluation.session_correlation) {
         lines.push(`### Session Correlation`, ``, `- Burst count: \`${evaluation.session_correlation.burst_count}\``, `- Window: \`${evaluation.session_correlation.window}\``, ``);
+    }
+    if (evaluation.trust_profile) {
+        lines.push(`### Trust Profile`, ``, `- Strictness: \`${evaluation.trust_profile.strictness}\``, `- Reason: ${evaluation.trust_profile.reason}`, ``);
+    }
+    if (evaluation.escalation_status) {
+        lines.push(`### Escalation`, ``, `- Enabled: \`${evaluation.escalation_status.enabled}\``, `- Targets: \`${evaluation.escalation_status.target_count}\``, ...(evaluation.escalation_status.acknowledge_sla_minutes
+            ? [
+                `- Acknowledge SLA: \`${evaluation.escalation_status.acknowledge_sla_minutes}m\``,
+            ]
+            : []), ...(evaluation.escalation_status.resolve_sla_minutes
+            ? [`- Resolve SLA: \`${evaluation.escalation_status.resolve_sla_minutes}m\``]
+            : []), ``);
     }
     if (evaluation.policyFindings && evaluation.policyFindings.length > 0) {
         lines.push(`### Policy Findings`, ``);

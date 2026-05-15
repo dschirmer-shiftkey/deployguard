@@ -650,6 +650,28 @@ describe("formatGateReport", () => {
     expect(report).toContain("`60m`");
   });
 
+  it("includes trust profile and escalation sections when present", () => {
+    const evaluation: GateEvaluation = {
+      ...baseEvaluation,
+      trust_profile: {
+        strictness: "strict",
+        reason: "Automated provenance with high composite risk score",
+      },
+      escalation_status: {
+        enabled: true,
+        target_count: 2,
+        acknowledge_sla_minutes: 30,
+        resolve_sla_minutes: 240,
+      },
+    };
+    const report = formatGateReport(evaluation);
+    expect(report).toContain("Trust Profile");
+    expect(report).toContain("`strict`");
+    expect(report).toContain("Escalation");
+    expect(report).toContain("`2`");
+    expect(report).toContain("`30m`");
+  });
+
   it("omits sections that have no data", () => {
     const evaluation: GateEvaluation = {
       ...baseEvaluation,
