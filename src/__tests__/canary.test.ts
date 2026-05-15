@@ -1,4 +1,3 @@
-import { describe, it, expect } from "vitest";
 import { parseVercelWebhook, parseGenericWebhook } from "../canary.js";
 
 describe("parseVercelWebhook", () => {

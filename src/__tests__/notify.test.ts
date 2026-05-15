@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { vi } from "vitest";
+
 import { sendWebhook, storeEvaluation } from "../notify.js";
 import type { GateEvaluation } from "../types.js";
 
