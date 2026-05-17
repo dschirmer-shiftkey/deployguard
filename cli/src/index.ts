@@ -245,7 +245,7 @@ async function main() {
 ${BOLD}${GREEN}Trailhead CLI v3.0.2${RESET}
 
 ${BOLD}Usage:${RESET}
-  npx trailhead init    Interactive setup wizard
+  npx @komatikai/trailhead init    Interactive setup wizard
 
 ${BOLD}Learn more:${RESET}
   https://github.com/KomatikAI/trailhead

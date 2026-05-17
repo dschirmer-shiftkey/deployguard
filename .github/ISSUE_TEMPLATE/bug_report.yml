@@ -24,7 +24,7 @@ body:
       options:
         - GitHub Action
         - GitHub App
-        - CLI (npx trailhead init)
+        - CLI (npx @komatikai/trailhead init)
         - Risk scoring
         - DORA metrics
         - Security gate

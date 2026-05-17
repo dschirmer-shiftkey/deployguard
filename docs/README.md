@@ -22,7 +22,7 @@ All three share a single **risk engine** (`src/risk-engine.ts`) — a pure TypeS
 
 ### CLI
 
-`npx trailhead init` generates `.trailhead.yml` and the workflow YAML interactively. See `cli/README.md`.
+`npx @komatikai/trailhead init` generates `.trailhead.yml` and the workflow YAML interactively. See `cli/README.md`.
 
 ## Risk Scoring
 
@@ -136,7 +136,7 @@ environments:
 Both the Action and the App respect these overrides when `environment` is set.
 
 Trailhead prefers `.trailhead.yml` from the checked-out workspace. For existing installs,
-legacy `.deployguard.yml` is still accepted when `.trailhead.yml` is absent.
+legacy v1 config filenames are still accepted when `.trailhead.yml` is absent.
 
 This repository's `.trailhead.yml` ignores generated MCP copy/artifact paths so risk scores
 reflect canonical source changes instead of prebuild output.
@@ -262,9 +262,9 @@ This repository uses `dev` as the active/default branch. `main` and `staging` ar
 fast-forwarded to `dev` for compatibility with older automation, and open PRs should target
 `dev`.
 
-The unmerged branch `origin/experiment/rd-satellite/deployguard-supply-chain-risk` is known
-not to be promotion-ready: its targeted tests pass, but `app` and `mcp` builds fail until
-their prebuild scripts copy the new `supply-chain` module alongside `risk-engine.ts`.
+The unmerged legacy supply-chain experiment branch is known not to be promotion-ready: its
+targeted tests pass, but `app` and `mcp` builds fail until their prebuild scripts copy the
+new `supply-chain` module alongside `risk-engine.ts`.
 
 ## Key Decisions
 

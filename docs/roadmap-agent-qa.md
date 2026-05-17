@@ -118,7 +118,7 @@
   - Major version jumps.
   - Known-vulnerable transitive dependencies.
   - Typosquat / nonexistent package detection.
-- Incorporate or supersede work from `origin/experiment/rd-satellite/deployguard-supply-chain-risk`.
+- Incorporate or supersede work from the legacy supply-chain experiment branch.
 
 **Acceptance Criteria**
 

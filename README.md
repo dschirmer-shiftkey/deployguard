@@ -11,7 +11,7 @@ Deployment gate for GitHub PRs. Scores code risk, checks production health, inte
 **Option A — Interactive setup:**
 
 ```bash
-npx trailhead init
+npx @komatikai/trailhead init
 ```
 
 **Option B — Manual setup:**
@@ -283,7 +283,7 @@ ignore:
 ```
 
 Trailhead first loads `.trailhead.yml` from the checked-out workspace, then falls back to
-the GitHub Contents API. Existing repositories can keep using legacy `.deployguard.yml`;
+the GitHub Contents API. Existing repositories can keep using the legacy v1 config filename;
 Trailhead will read it when `.trailhead.yml` is not present.
 
 This repository's own `.trailhead.yml` ignores generated MCP copy/artifact paths
@@ -294,13 +294,13 @@ scores canonical source changes rather than prebuild output.
 
 ## Compatibility
 
-Trailhead is the canonical product name after the DeployGuard-to-Trailhead migration.
+Trailhead is the canonical product name.
 Compatibility remains for shipped surfaces:
 
-- Legacy `.deployguard.yml` configs are still accepted as a fallback.
-- Legacy `DEPLOYGUARD_*` environment variables are still read where those env vars were
+- Legacy v1 config filenames are still accepted as a fallback.
+- Legacy v1 environment variable aliases are still read where those aliases were
   previously supported.
-- Old `deployguard:*` risk labels are removed when Trailhead applies the new
+- Legacy pre-rebrand risk labels are removed when Trailhead applies the new
   `trailhead:*` risk label.
 
 ## Policy Profiles and Overrides
@@ -407,7 +407,7 @@ jobs:
 ## CLI
 
 ```bash
-npx trailhead init
+npx @komatikai/trailhead init
 ```
 
 Interactive wizard that generates `.trailhead.yml` and the workflow YAML with all v3 features. No installation required.

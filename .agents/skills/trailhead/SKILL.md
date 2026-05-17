@@ -110,7 +110,7 @@ The standard Trailhead workflow for any PR:
 
 ## Configuration
 
-Trailhead reads `.trailhead.yml` (or legacy `.deployguard.yml`) from the repo root for:
+Trailhead reads `.trailhead.yml` (or a legacy v1 config filename alias) from the repo root for:
 
 - Custom risk and warn thresholds per environment
 - Sensitivity file patterns (globs for auth, infra, payments, etc.)
@@ -130,4 +130,4 @@ Trailhead also runs as a GitHub Action (`KomatikAI/trailhead@v3`). The MCP tools
 - `dev` is the active/default branch. `main` and `staging` are compatibility mirrors and should stay fast-forwarded to `dev`.
 - MCP prebuild copies `src/risk-engine.ts` and `src/adapters/*` into `mcp/src/`; matching `mcp/dist/risk-engine.*` and `mcp/dist/adapters/*` are intentionally committed runtime artifacts.
 - If `src/risk-engine.ts` imports another local module, update the `app/` and `mcp/` prebuild scripts and committed dist artifacts in the same change.
-- `origin/experiment/rd-satellite/deployguard-supply-chain-risk` is not promotion-ready until app and MCP builds pass with the new `supply-chain` module.
+- The legacy supply-chain experiment branch is not promotion-ready until app and MCP builds pass with the new `supply-chain` module.

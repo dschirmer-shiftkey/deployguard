@@ -6,8 +6,8 @@ All notable changes to Trailhead will be documented in this file.
 
 ### Changed
 
-- **Trailhead canonical naming** — Completed the DeployGuard-to-Trailhead migration across action metadata, docs, examples, package metadata, telemetry attributes, risk labels, and persisted evaluation targets.
-- **Compatibility preserved** — `.deployguard.yml` and shipped `DEPLOYGUARD_*` environment variables remain supported as legacy fallbacks.
+- **Trailhead canonical naming** — Completed the canonical naming migration across action metadata, docs, examples, package metadata, telemetry attributes, risk labels, and persisted evaluation targets.
+- **Compatibility preserved** — legacy v1 config/env aliases remain supported as fallbacks.
 - **Repository branch sync** — `dev` is the active/default branch; `main` and `staging` are kept fast-forwarded to `dev`.
 
 ### Fixed
@@ -18,7 +18,7 @@ All notable changes to Trailhead will be documented in this file.
 
 ### Notes
 
-- `origin/experiment/rd-satellite/deployguard-supply-chain-risk` remains unpromoted. Its targeted tests pass, but `app` and `mcp` builds fail until their prebuild scripts copy the new `supply-chain` module alongside `risk-engine.ts`.
+- The legacy supply-chain experiment branch remains unpromoted. Its targeted tests pass, but `app` and `mcp` builds fail until their prebuild scripts copy the new `supply-chain` module alongside `risk-engine.ts`.
 
 ## [3.0.2] - 2026-04-16
 
@@ -113,7 +113,7 @@ All notable changes to Trailhead will be documented in this file.
 
 - **`formatDeploymentFrequencyForOutput()`** in `src/dora.ts` — clear label when no default-branch deploy workflows were detected in the DORA window (avoids confusing “0 per month” in action outputs and job summary tables).
 - **Example workflow** — `examples/github-actions/trailhead-deploy-tracker.yml` patches `deploy_outcome` / `deployed_at` after a production push for dashboard correlation.
-- **`npx trailhead init`** — optional prompts for evaluation store URL, store secret name, and Supabase direct-insert fallback env vars; optional “DORA outputs” echo step when DORA is enabled.
+- **`npx @komatikai/trailhead init`** — optional prompts for evaluation store URL, store secret name, and Supabase direct-insert fallback env vars; optional “DORA outputs” echo step when DORA is enabled.
 
 ### Changed
 
@@ -150,7 +150,7 @@ All notable changes to Trailhead will be documented in this file.
 - **PR age factor** — New `pr_age` risk factor scores PRs higher when they've been open for many days (stale PRs carry more risk from merge conflicts and context loss). Carries weight 1.
 - **Release freeze windows** — New `freeze` config in `.trailhead.yml` blocks deployments during specified days/hours (e.g., no deploys after 3pm Friday). Frozen deploys are automatically blocked.
 - **Rich Job Summary** — PR reports now include shield.io badges, collapsible risk factor breakdown with ASCII bar charts, health check status icons, and improved sensitive file markers.
-- **`npx trailhead init` CLI** (`cli/`) — Interactive setup wizard that generates `.trailhead.yml` and `.github/workflows/trailhead.yml` with guided prompts for thresholds, health checks, DORA, OTel, and freeze windows.
+- **`npx @komatikai/trailhead init` CLI** (`cli/`) — Interactive setup wizard that generates `.trailhead.yml` and `.github/workflows/trailhead.yml` with guided prompts for thresholds, health checks, DORA, OTel, and freeze windows.
 
 ### Changed
 

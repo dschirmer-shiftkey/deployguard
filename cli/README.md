@@ -5,7 +5,7 @@ Interactive setup wizard for Trailhead. Generates `.trailhead.yml` and the GitHu
 ## Usage
 
 ```bash
-npx trailhead init
+npx @komatikai/trailhead init
 ```
 
 No installation required. The wizard walks you through:
@@ -49,4 +49,4 @@ npx tsc
 npm publish
 ```
 
-The package is published as `trailhead` on npm, making `npx trailhead init` work without installation.
+The package is published as `@komatikai/trailhead` on npm, making `npx @komatikai/trailhead init` work without installation.

@@ -36,7 +36,7 @@ src/                 # GitHub Action source (TypeScript)
   healers/           # Test failure auto-repair
   __tests__/         # Vitest test files
 app/                 # GitHub App (Hono server)
-cli/                 # CLI wizard (npx trailhead init)
+cli/                 # CLI wizard (npx @komatikai/trailhead init)
 mcp/                 # MCP server (internal)
 dist/                # Bundled action (committed)
 examples/            # CI templates, observability dashboards
