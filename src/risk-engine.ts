@@ -10,6 +10,7 @@ export interface FileInfo {
   additions?: number;
   deletions?: number;
   changes: number;
+  patch?: string;
 }
 
 export interface RiskFactorResult {
@@ -24,10 +25,24 @@ export interface SensitivityConfig {
   low: string[];
 }
 
+export interface RiskProfileMatchDef {
+  files_include: string[];
+  files_exclude: string[];
+  min_files?: number;
+  max_files?: number;
+}
+
+export interface RiskProfileDef {
+  name?: string;
+  match: RiskProfileMatchDef;
+  weights: Record<string, number>;
+}
+
 export interface RiskConfig {
   sensitivity?: SensitivityConfig;
   weights?: Record<string, number>;
   ignore?: string[];
+  profiles?: RiskProfileDef[];
 }
 
 export interface SecurityAlertCounts {
@@ -89,6 +104,14 @@ export const DEPENDENCY_FILES = [
   /^composer\.lock$/,
 ];
 
+const PACKAGE_JSON_DEPENDENCY_FIELDS = new Set([
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+  "bundledDependencies",
+]);
+
 // ---------------------------------------------------------------------------
 // Factor weights (v3: includes security_alerts, deployment_history, canary_status)
 // ---------------------------------------------------------------------------
@@ -129,6 +152,42 @@ function globToRegex(pattern: string): RegExp {
 
 export function matchesGlobs(filename: string, patterns: string[]): boolean {
   return patterns.some((p) => globToRegex(p).test(filename));
+}
+
+// ---------------------------------------------------------------------------
+// Risk profile matching
+// ---------------------------------------------------------------------------
+
+export function matchRiskProfile(
+  filenames: string[],
+  profiles: RiskProfileDef[],
+): RiskProfileDef | null {
+  if (profiles.length === 0) return null;
+
+  for (const profile of profiles) {
+    const m = profile.match;
+
+    if (m.min_files !== undefined && filenames.length < m.min_files) continue;
+    if (m.max_files !== undefined && filenames.length > m.max_files) continue;
+
+    if (
+      m.files_include.length > 0 &&
+      !m.files_include.every((pattern) => filenames.some((f) => matchesGlobs(f, [pattern])))
+    ) {
+      continue;
+    }
+
+    if (
+      m.files_exclude.length > 0 &&
+      m.files_exclude.some((pattern) => filenames.some((f) => matchesGlobs(f, [pattern])))
+    ) {
+      continue;
+    }
+
+    return profile;
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +309,10 @@ export function computeRiskScore(
   const sourceFileCount = effectiveFiles.length - testFileCount - nonSourceCount;
   if (sourceFileCount > 0) {
     const testRatio = testFileCount / sourceFileCount;
-    const testCoverageScore = Math.round(Math.max(0, 100 - testRatio * 200));
+    const testCoverageScore =
+      testFileCount === 0
+        ? 100
+        : Math.round(Math.max(0, 100 - testRatio * 100 - Math.min(testFileCount, 5) * 10));
     factors.push({
       type: "test_coverage",
       score: testCoverageScore,
@@ -301,13 +363,63 @@ export function detectDependencyChanges(files: FileInfo[]): RiskFactorResult | n
   );
   if (depFiles.length === 0) return null;
 
-  const hasLockfile = depFiles.some((f) =>
-    /\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename),
-  );
-  const hasManifest = depFiles.some(
-    (f) => !/\.(lock|sum)$|lock\.(json|yaml)$/.test(f.filename),
-  );
-  const totalChanges = depFiles.reduce((s, f) => s + f.changes, 0);
+  const isLockfile = (filename: string): boolean =>
+    /\.(lock|sum)$|lock\.(json|yaml)$/.test(filename);
+
+  const packageJsonTouchesDependencies = (patch?: string): boolean => {
+    if (!patch) return true;
+    let activeSection: string | null = null;
+    let sectionDepth = 0;
+
+    for (const rawLine of patch.split("\n")) {
+      if (rawLine.startsWith("@@")) continue;
+      const prefix = rawLine[0];
+      if (prefix !== " " && prefix !== "+" && prefix !== "-") continue;
+
+      const line = rawLine.slice(1);
+      const sectionMatch = line.match(/^\s*"([^"]+)"\s*:\s*\{\s*$/);
+      if (sectionMatch) {
+        const key = sectionMatch[1];
+        if (PACKAGE_JSON_DEPENDENCY_FIELDS.has(key)) {
+          activeSection = key;
+          sectionDepth = 1;
+          if (prefix !== " ") return true;
+          continue;
+        }
+      }
+
+      if (!activeSection) continue;
+
+      const openCount = (line.match(/\{/g) ?? []).length;
+      const closeCount = (line.match(/\}/g) ?? []).length;
+      sectionDepth += openCount - closeCount;
+
+      if (prefix !== " " && /^\s*"[^"]+"\s*:\s*".*"\s*,?\s*$/.test(line)) {
+        return true;
+      }
+
+      if (sectionDepth <= 0) {
+        activeSection = null;
+        sectionDepth = 0;
+      }
+    }
+
+    return false;
+  };
+
+  const relevantDepFiles = depFiles.filter((f) => {
+    const base = f.filename.replace(/.*\//, "");
+    if (base === "package.json") {
+      return packageJsonTouchesDependencies(f.patch);
+    }
+    return true;
+  });
+
+  if (relevantDepFiles.length === 0) return null;
+
+  const hasLockfile = relevantDepFiles.some((f) => isLockfile(f.filename));
+  const hasManifest = relevantDepFiles.some((f) => !isLockfile(f.filename));
+  const totalChanges = relevantDepFiles.reduce((s, f) => s + f.changes, 0);
 
   const score = Math.min(
     100,
@@ -319,11 +431,11 @@ export function detectDependencyChanges(files: FileInfo[]): RiskFactorResult | n
     type: "dependency_changes",
     score,
     detail: {
-      files: depFiles.map((f) => f.filename),
+      files: relevantDepFiles.map((f) => f.filename),
       hasManifest,
       hasLockfile,
       totalChanges,
-      description: "Dependencies added or updated",
+      description: "Dependency manifests/lockfiles changed",
     },
   };
 }

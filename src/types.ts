@@ -160,6 +160,21 @@ export const CanaryConfig = z.object({
 });
 export type CanaryConfig = z.infer<typeof CanaryConfig>;
 
+export const RiskProfileMatch = z.object({
+  files_include: z.array(z.string()).default([]),
+  files_exclude: z.array(z.string()).default([]),
+  min_files: z.number().int().min(1).optional(),
+  max_files: z.number().int().min(1).optional(),
+});
+export type RiskProfileMatch = z.infer<typeof RiskProfileMatch>;
+
+export const RiskProfile = z.object({
+  name: z.string().optional(),
+  match: RiskProfileMatch,
+  weights: z.record(z.number().min(0).max(10)).default({}),
+});
+export type RiskProfile = z.infer<typeof RiskProfile>;
+
 export const RepoConfig = z.object({
   schema_version: z.number().int().positive().default(1),
   sensitivity: z
@@ -170,6 +185,7 @@ export const RepoConfig = z.object({
     })
     .default({}),
   weights: z.record(z.number().min(0).max(10)).default({}),
+  profiles: z.array(RiskProfile).default([]),
   thresholds: z
     .object({
       risk: z.number().min(0).max(100).optional(),

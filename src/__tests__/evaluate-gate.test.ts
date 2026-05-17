@@ -35,7 +35,16 @@ vi.mock("@actions/github", () => ({
           ],
         }),
         listCommits: vi.fn().mockResolvedValue({
-          data: [{ sha: "pr-commit-1", commit: { message: "feat: add feature" } }],
+          data: [
+            {
+              sha: "pr-commit-1",
+              author: { login: "test-author" },
+              commit: {
+                message: "feat: add feature",
+                author: { name: "Test Author", email: "test-author@example.com" },
+              },
+            },
+          ],
         }),
         get: vi.fn().mockResolvedValue({
           data: {
@@ -47,7 +56,12 @@ vi.mock("@actions/github", () => ({
         listCommits: vi.fn().mockResolvedValue({
           data: Array.from({ length: 12 }, (_, i) => ({
             sha: `commit-${i}`,
-            commit: { message: `commit ${i}` },
+            author: { login: "test-author" },
+            committer: { login: "test-author" },
+            commit: {
+              message: `commit ${i}`,
+              author: { name: "Test Author", email: "test-author@example.com" },
+            },
           })),
         }),
       },

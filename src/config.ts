@@ -13,6 +13,7 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "schema_version",
   "sensitivity",
   "weights",
+  "profiles",
   "thresholds",
   "ignore",
   "freeze",

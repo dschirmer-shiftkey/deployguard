@@ -100,7 +100,7 @@ describe("computeRiskScore", () => {
         changes: 10,
       },
     ]);
-    expect(result.score).toBeLessThanOrEqual(30);
+    expect(result.score).toBeLessThanOrEqual(35);
     expect(result.factors.find((f) => f.type === "file_count")).toBeDefined();
     expect(result.factors.find((f) => f.type === "code_churn")).toBeDefined();
     expect(result.factors.find((f) => f.type === "test_coverage")).toBeDefined();
@@ -795,7 +795,7 @@ describe("formatGateReport", () => {
     };
     const report = formatGateReport(evaluation);
     expect(report).toContain("### Guidance");
-    expect(report).toContain("Risk score exceeds threshold");
+    expect(report).toContain("Advisory warning only");
   });
 
   it("omits guidance for allow decision", () => {
