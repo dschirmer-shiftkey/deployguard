@@ -19,6 +19,7 @@ import {
   decideGate,
   isSensitiveFile,
   matchesGlobs,
+  matchRiskProfile,
   sensitivityWeight as sensitivityWeightShared,
   isInFreezeWindow,
   type FileInfo,
@@ -243,17 +244,54 @@ async function computeAuthorHistory(
       };
     }
 
+    const authorEmails = new Set<string>();
+
+    try {
+      const { data: prCommits } = await octokit.rest.pulls.listCommits({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+      for (const commit of prCommits) {
+        const email = commit.commit?.author?.email?.trim().toLowerCase();
+        if (email) authorEmails.add(email);
+      }
+    } catch (error) {
+      core.debug(`Unable to collect PR author emails for history: ${error}`);
+    }
+
     const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: commits } = await octokit.rest.repos.listCommits({
+    const commitShas = new Set<string>();
+
+    const { data: commitsByLogin } = await octokit.rest.repos.listCommits({
       owner,
       repo,
       author,
       since,
       per_page: 100,
     });
+    for (const c of commitsByLogin) commitShas.add(c.sha);
 
-    const commitCount = commits.length;
-    const score = Math.max(0, 100 - commitCount * 2);
+    for (const email of authorEmails) {
+      if (commitShas.size >= 50) break;
+      try {
+        const { data: commitsByEmail } = await octokit.rest.repos.listCommits({
+          owner,
+          repo,
+          author: email,
+          since,
+          per_page: 100,
+        });
+        for (const c of commitsByEmail) commitShas.add(c.sha);
+      } catch {
+        core.debug(`Email-based commit lookup failed for ${email}`);
+      }
+    }
+
+    const commitCount = commitShas.size;
+    const score =
+      commitCount === 0 ? 100 : Math.max(5, Math.round(100 / (1 + commitCount / 10)));
 
     return {
       type: "author_history",
@@ -262,7 +300,7 @@ async function computeAuthorHistory(
         author,
         commitCount,
         dayRange: 90,
-        description: "Author repo familiarity (90-day commits)",
+        description: "Author familiarity risk (90-day commits, lower is better)",
       },
     };
   } catch {
@@ -1434,7 +1472,21 @@ export async function evaluateGate(
     if (secFactor) riskFactors.push(secFactor);
   }
 
-  const customWeights = repoConfig?.weights ?? {};
+  const fileNames = files.map((f) => f.filename);
+  const matchedProfile = matchRiskProfile(fileNames, repoConfig?.profiles ?? []);
+  const customWeights = {
+    ...(repoConfig?.weights ?? {}),
+    ...(matchedProfile?.weights ?? {}),
+  };
+  if (matchedProfile) {
+    const label = matchedProfile.name ?? "unnamed";
+    core.info(
+      `Risk profile "${label}" matched — weight overrides applied: ${JSON.stringify(matchedProfile.weights)}`,
+    );
+    policyFindings.push(
+      `Risk profile "${label}" matched (${Object.entries(matchedProfile.weights).map(([k, v]) => `${k}=${v}`).join(", ")}).`,
+    );
+  }
   const ciIntegrityConfig = repoConfig?.policies?.ci_integrity;
   const ciIntegrity =
     ciIntegrityConfig?.enabled === false
@@ -1634,7 +1686,6 @@ export async function evaluateGate(
     }
   }
 
-  const fileNames = files.map((f) => f.filename);
   const escalationCfg = repoConfig?.escalation;
   const escalationStatus =
     gateDecision === "block" && escalationCfg
@@ -2074,9 +2125,13 @@ function buildGuidance(evaluation: GateEvaluation): string[] {
   }
 
   if (lines.length === 2) {
-    lines.push(
-      `- Risk score exceeds threshold. Review the risk factors above before proceeding.`,
-    );
+    if (evaluation.gateDecision === "warn") {
+      lines.push(
+        `- Advisory warning only: review the risk factors above and proceed with normal caution.`,
+      );
+    } else {
+      lines.push(`- Risk score exceeds threshold. Review the risk factors above before merging.`);
+    }
   }
 
   lines.push(``);

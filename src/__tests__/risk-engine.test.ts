@@ -8,6 +8,7 @@ import {
   isSensitiveFile,
   sensitivityWeight,
   matchesGlobs,
+  matchRiskProfile,
   isRollback,
   isInFreezeWindow,
   computeSecurityFactor,
@@ -135,14 +136,32 @@ describe("risk-engine", () => {
       expect(detectDependencyChanges(files)).toBeNull();
     });
 
-    it("detects package.json changes", () => {
+    it("detects package.json dependency section changes", () => {
       const files = [
-        { filename: "package.json", changes: 5 },
+        {
+          filename: "package.json",
+          changes: 5,
+          patch:
+            '@@ -4,7 +4,7 @@\n  "dependencies": {\n-    "zod": "^3.22.0"\n+    "zod": "^3.24.0"\n   }\n',
+        },
         { filename: "package-lock.json", changes: 200 },
       ];
       const result = detectDependencyChanges(files);
       expect(result).not.toBeNull();
       expect(result?.type).toBe("dependency_changes");
+    });
+
+    it("ignores package.json script/version-only edits", () => {
+      const files = [
+        {
+          filename: "package.json",
+          changes: 6,
+          patch:
+            '@@ -2,8 +2,9 @@\n-  "version": "2.0.0",\n+  "version": "2.1.0",\n   "scripts": {\n+    "playground:pilot": "tsx src/playground/pilot.ts",\n     "test": "vitest"\n   }\n',
+        },
+      ];
+      const result = detectDependencyChanges(files);
+      expect(result).toBeNull();
     });
   });
 
@@ -283,6 +302,124 @@ describe("risk-engine", () => {
       expect(FACTOR_WEIGHTS.security_alerts).toBe(4);
       expect(FACTOR_WEIGHTS.deployment_history).toBe(2);
       expect(FACTOR_WEIGHTS.canary_status).toBe(2);
+    });
+  });
+
+  describe("matchRiskProfile", () => {
+    it("returns null when no profiles defined", () => {
+      expect(matchRiskProfile(["src/main.ts"], [])).toBeNull();
+    });
+
+    it("matches a release-shaped profile by files_include", () => {
+      const profiles = [
+        {
+          name: "release",
+          match: {
+            files_include: ["CHANGELOG.md", "package.json"],
+            files_exclude: [],
+            min_files: 5,
+          },
+          weights: { file_count: 1, code_churn: 1 },
+        },
+      ];
+      const files = [
+        "CHANGELOG.md",
+        "package.json",
+        "src/index.ts",
+        "src/lib.ts",
+        "src/lib.test.ts",
+        "src/types.ts",
+        "README.md",
+      ];
+      const result = matchRiskProfile(files, profiles);
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("release");
+      expect(result!.weights).toEqual({ file_count: 1, code_churn: 1 });
+    });
+
+    it("rejects profile when files_include patterns are not all present", () => {
+      const profiles = [
+        {
+          name: "release",
+          match: {
+            files_include: ["CHANGELOG.md", "package.json"],
+            files_exclude: [],
+          },
+          weights: { file_count: 1 },
+        },
+      ];
+      const result = matchRiskProfile(["CHANGELOG.md", "src/index.ts"], profiles);
+      expect(result).toBeNull();
+    });
+
+    it("rejects profile when files_exclude patterns match", () => {
+      const profiles = [
+        {
+          name: "safe-release",
+          match: {
+            files_include: ["CHANGELOG.md"],
+            files_exclude: ["**/migrations/**"],
+          },
+          weights: { file_count: 1 },
+        },
+      ];
+      const files = ["CHANGELOG.md", "package.json", "supabase/migrations/001.sql"];
+      const result = matchRiskProfile(files, profiles);
+      expect(result).toBeNull();
+    });
+
+    it("rejects profile when file count is below min_files", () => {
+      const profiles = [
+        {
+          name: "large-release",
+          match: { files_include: [], files_exclude: [], min_files: 10 },
+          weights: { file_count: 0.5 },
+        },
+      ];
+      const result = matchRiskProfile(["src/a.ts", "src/b.ts"], profiles);
+      expect(result).toBeNull();
+    });
+
+    it("rejects profile when file count exceeds max_files", () => {
+      const profiles = [
+        {
+          name: "small-only",
+          match: { files_include: [], files_exclude: [], max_files: 3 },
+          weights: { code_churn: 0.5 },
+        },
+      ];
+      const files = ["a.ts", "b.ts", "c.ts", "d.ts"];
+      const result = matchRiskProfile(files, profiles);
+      expect(result).toBeNull();
+    });
+
+    it("returns the first matching profile when multiple could match", () => {
+      const profiles = [
+        {
+          name: "first",
+          match: { files_include: [], files_exclude: [], min_files: 2 },
+          weights: { file_count: 1 },
+        },
+        {
+          name: "second",
+          match: { files_include: [], files_exclude: [], min_files: 2 },
+          weights: { file_count: 0.5 },
+        },
+      ];
+      const result = matchRiskProfile(["a.ts", "b.ts", "c.ts"], profiles);
+      expect(result!.name).toBe("first");
+    });
+
+    it("matches profile with no constraints (empty include/exclude, no min/max)", () => {
+      const profiles = [
+        {
+          name: "catch-all",
+          match: { files_include: [], files_exclude: [] },
+          weights: { code_churn: 0.5 },
+        },
+      ];
+      const result = matchRiskProfile(["src/main.ts"], profiles);
+      expect(result!.name).toBe("catch-all");
     });
   });
 });
